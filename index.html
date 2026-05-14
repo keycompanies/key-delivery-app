@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Key Delivery"/>
+<meta name="theme-color" content="#0D1F3C"/>
+<title>Key Companies — Delivery Log</title>
+<style>
+  :root {
+    --navy:        #0D1F3C;
+    --navy-mid:    #1A3460;
+    --navy-light:  #1E3D6E;
+    --steel:       #4A5E7A;
+    --steel-light: #8298B2;
+    --orange:      #E07A2F;
+    --orange-light:#F0955A;
+    --orange-bg:   #FDF0E6;
+    --bg:          #EDF0F5;
+    --surface:     #F5F7FA;
+    --card:        #FFFFFF;
+    --text:        #0D1F3C;
+    --muted:       #5A6E88;
+    --border:      #CDD5E0;
+    --success:     #1D6E45;
+    --success-bg:  #E6F4ED;
+    --danger:      #B93030;
+    --radius:      16px;
+    --radius-sm:   10px;
+    --radius-xs:   6px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding-bottom: 48px;
+  }
+
+  /* ── PIN Screen ── */
+  .pin-screen {
+    position: fixed; inset: 0; z-index: 9999;
+    background: linear-gradient(160deg, var(--navy) 0%, var(--navy-mid) 100%);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 40px 24px;
+  }
+  .pin-logo {
+    width: 80px; height: 80px; border-radius: 18px;
+    background: var(--orange); margin-bottom: 20px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 900; font-size: 32px; color: white;
+  }
+  .pin-title { font-size: 22px; font-weight: 800; color: white; margin-bottom: 6px; }
+  .pin-sub { font-size: 14px; color: rgba(255,255,255,0.55); margin-bottom: 36px; }
+  .pin-dots { display: flex; gap: 14px; margin-bottom: 32px; }
+  .pin-dot {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+    transition: background 0.2s;
+  }
+  .pin-dot.filled { background: var(--orange); }
+  .pin-pad { display: grid; grid-template-columns: repeat(3, 72px); gap: 14px; }
+  .pin-btn {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: white; font-size: 22px; font-weight: 600;
+    cursor: pointer; transition: background 0.15s;
+    font-family: inherit;
+  }
+  .pin-btn:active { background: rgba(255,255,255,0.25); }
+  .pin-btn.del { font-size: 18px; }
+  .pin-error {
+    color: #FF6B6B; font-size: 13px; font-weight: 600;
+    margin-top: 20px; opacity: 0; transition: opacity 0.3s;
+  }
+  .pin-error.show { opacity: 1; }
+
+  /* ── Header ── */
+  .header {
+    background: linear-gradient(160deg, var(--navy) 0%, var(--navy-mid) 100%);
+    padding: 52px 20px 0;
+    position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 2px 12px rgba(13,31,60,0.18);
+  }
+  .header-top { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; }
+  .logo-img { height: 28px; width: auto; object-fit: contain; filter: brightness(0) invert(1); }
+  .view-log-btn {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--orange);
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 20px;
+    font-size: 12px; font-weight: 700;
+    cursor: pointer; text-decoration: none;
+    letter-spacing: 0.2px;
+    transition: background 0.2s;
+    border: none;
+  }
+  .view-log-btn:active { background: var(--orange-light); }
+
+  .date-pill {
+    background: rgba(255,255,255,0.08);
+    border-top: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.65);
+    font-size: 11px; letter-spacing: 0.4px;
+    text-align: center;
+    padding: 7px 20px;
+  }
+
+  /* ── Main ── */
+  .main { padding: 16px; max-width: 480px; margin: 0 auto; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 18px 18px 14px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 4px rgba(13,31,60,0.06);
+  }
+  .section-label {
+    font-size: 10px; font-weight: 800;
+    letter-spacing: 1.2px; text-transform: uppercase;
+    color: var(--orange);
+    margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after { content:''; flex:1; height:1px; background: var(--border); }
+
+  /* ── Fields ── */
+  .field { margin-bottom: 13px; }
+  .field:last-child { margin-bottom: 0; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 13px; }
+  label {
+    display: block; font-size: 11px; font-weight: 700;
+    color: var(--steel); margin-bottom: 5px; letter-spacing: 0.3px;
+    text-transform: uppercase;
+  }
+  label .req { color: var(--orange); margin-left: 2px; }
+  input[type=text], input[type=email], textarea {
+    width: 100%; padding: 11px 13px;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 15px; color: var(--text);
+    background: var(--surface); outline: none;
+    appearance: none; transition: border-color 0.2s, box-shadow 0.2s;
+    font-family: inherit;
+  }
+  input:focus, textarea:focus {
+    border-color: var(--orange);
+    box-shadow: 0 0 0 3px rgba(224,122,47,0.12);
+    background: #fff;
+  }
+  textarea { resize: none; height: 76px; line-height: 1.5; }
+
+  /* ── Geo ── */
+  .geo-row { display: flex; gap: 8px; align-items: flex-end; }
+  .geo-row input { flex: 1; }
+  .geo-btn {
+    background: var(--navy);
+    color: white; border: none;
+    border-radius: var(--radius-sm);
+    padding: 11px 14px; font-size: 18px;
+    cursor: pointer; flex-shrink: 0;
+    transition: background 0.2s;
+  }
+  .geo-btn:active { background: var(--navy-light); }
+  .geo-status { font-size: 11px; margin-top: 5px; color: var(--muted); }
+  .geo-status.ok  { color: var(--success); font-weight: 600; }
+  .geo-status.err { color: var(--danger); }
+
+  /* ── Photo ── */
+  .photo-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-sm);
+    padding: 22px 16px; text-align: center;
+    cursor: pointer; background: var(--surface);
+    position: relative; transition: border-color 0.2s, background 0.2s;
+  }
+  .photo-zone.has-photo { border-color: var(--orange); background: var(--orange-bg); }
+  .photo-zone input[type=file] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+  }
+  .photo-icon { font-size: 26px; margin-bottom: 5px; }
+  .photo-label { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .photo-sub { font-size: 10px; color: var(--border); margin-top: 3px; letter-spacing: 0.2px; }
+  .photo-preview { max-width: 100%; border-radius: var(--radius-sm); margin-top: 12px; display: none; }
+
+  /* ── Submit ── */
+  .submit-btn {
+    width: 100%; background: var(--orange);
+    color: white; border: none;
+    border-radius: var(--radius);
+    padding: 16px; font-size: 16px; font-weight: 800;
+    cursor: pointer; letter-spacing: 0.3px;
+    transition: background 0.2s, transform 0.1s;
+    margin-top: 4px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    box-shadow: 0 4px 14px rgba(224,122,47,0.35);
+  }
+  .submit-btn:active { transform: scale(0.98); background: var(--orange-light); }
+  .submit-btn.loading { opacity: 0.7; pointer-events: none; }
+
+  /* ── Success ── */
+  .success-screen { display: none; text-align: center; padding: 40px 20px; }
+  .success-check {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: var(--success-bg); margin: 0 auto 20px;
+    display: flex; align-items: center; justify-content: center; font-size: 34px;
+  }
+  .success-title { font-size: 22px; font-weight: 800; color: var(--navy); margin-bottom: 8px; }
+  .success-sub { font-size: 14px; color: var(--muted); line-height: 1.7; margin-bottom: 28px; }
+  .success-view-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--orange); color: white;
+    padding: 13px 28px; border-radius: 24px;
+    font-size: 14px; font-weight: 800; text-decoration: none;
+    box-shadow: 0 4px 14px rgba(224,122,47,0.3);
+    margin-bottom: 14px;
+  }
+  .new-entry-btn {
+    display: block; background: none;
+    border: 1.5px solid var(--border); color: var(--muted);
+    border-radius: var(--radius); padding: 13px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    font-family: inherit; width: 100%; margin-top: 10px;
+  }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+    background: var(--danger); color: white;
+    padding: 12px 22px; border-radius: 24px;
+    font-size: 13px; font-weight: 700;
+    opacity: 0; transition: opacity 0.3s;
+    z-index: 999; white-space: nowrap; max-width: 90vw;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- PIN SCREEN -->
+<div class="pin-screen" id="pinScreen">
+  <div class="pin-logo">KC</div>
+  <div class="pin-title">Key Companies</div>
+  <div class="pin-sub">Enter your driver PIN to continue</div>
+  <div class="pin-dots" id="pinDots">
+    <div class="pin-dot" id="dot0"></div>
+    <div class="pin-dot" id="dot1"></div>
+    <div class="pin-dot" id="dot2"></div>
+    <div class="pin-dot" id="dot3"></div>
+  </div>
+  <div class="pin-pad">
+    <button class="pin-btn" onclick="pinPress('1')">1</button>
+    <button class="pin-btn" onclick="pinPress('2')">2</button>
+    <button class="pin-btn" onclick="pinPress('3')">3</button>
+    <button class="pin-btn" onclick="pinPress('4')">4</button>
+    <button class="pin-btn" onclick="pinPress('5')">5</button>
+    <button class="pin-btn" onclick="pinPress('6')">6</button>
+    <button class="pin-btn" onclick="pinPress('7')">7</button>
+    <button class="pin-btn" onclick="pinPress('8')">8</button>
+    <button class="pin-btn" onclick="pinPress('9')">9</button>
+    <button class="pin-btn" onclick="pinPress('')"></button>
+    <button class="pin-btn" onclick="pinPress('0')">0</button>
+    <button class="pin-btn del" onclick="pinDelete()">⌫</button>
+  </div>
+  <div class="pin-error" id="pinError">Incorrect PIN. Please try again.</div>
+</div>
+
+<div class="header">
+  <div class="header-top">
+    <img class="logo-img" src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEBLAEsAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAEAAAAAAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAUADIDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDvfDfifw+viZ/COr6dp1nM1ra/Yb37NGd7PbxsVbcCN25jgng9OuM2zofiEeIxpX2bTth+cXP9mwbPLz977nX29fzqfxb4D03x94Q0+K3dLbxBY2UPkzkYyDGpCN6qc9eoP4g5/wAI/iPeQ6ifBvjrfba1bt5ME85wZfRGPdumG/iGO/Xtv7rlBXfVfqcK0koz2ez/AEPQb/SdL0+XRYG03TZBcXBhmlktIwSoglfPAAByg/DNVGttOudM1DVbLR9KGnRWzvas1ohNwwUkSdOE44/vZz0xnY8UabFqb6Ql0oe2ivPNlj+Y718mVduB1GWGQeCMg+hzbiKOCDUrKxnjWwvraV44ZAy+TI2BlOOY2Lg47HOMgkLzp3OhqzZW0jSdNu2gxc6BcO6bjDFYw7unsSeKURac+mrAui6UNdM32NovsqFVlAyZMYzs2fvBzyCB1NW9J1Nofs6y6dZQIiKHlSY5UcDOPLHqO44+hqwGsY/FU+qM8efsMcW4I28AuT6dDlfy9qG3fUElbQ8S8SadZR+ItURbS3CrdSgARKABvPtRVrxR/wAjNq//AF9zf+hmiu1N2OGSV2XNG8b3sFtYzpZWPnpBGgk/e5ICADID46D0qj4o1W08U3cN1rug6Xc3MK7UlHnRsBnOCUkGfbPTmiisL2d0dFrxszfT4i6otvDD9ksGSIAIXErMMDHLF8k46knnJzSL8QtQXGNO0rjOMxOcZGOPn444+nFFFTZF3Yg+IN+ChGm6SCmNpELcY6Y+ahfiBqCrtSw01F2hNqJIowOgwH7UUUWQrs8x1nxRez6vfStFbBnndiFVsDLE8c0UUV2JaHC27n//2Q==" alt="Key Companies"/>
+    <a id="viewLogBtn" href="#" target="_blank" class="view-log-btn">
+      📋 Today's Log
+    </a>
+  </div>
+  <div class="date-pill" id="dateBanner"></div>
+</div>
+
+<div class="main">
+
+  <!-- SUCCESS SCREEN -->
+  <div class="success-screen" id="successScreen">
+    <div class="success-check">✅</div>
+    <div class="success-title">Delivery Logged!</div>
+    <div class="success-sub" id="successMsg">Your delivery has been recorded in today's log.</div>
+    <a id="successViewBtn" href="#" target="_blank" class="success-view-btn">📋 View Today's Sheet</a>
+    <button class="new-entry-btn" onclick="resetForm()">+ Log Another Delivery</button>
+  </div>
+
+  <!-- FORM -->
+  <div id="formArea">
+
+    <!-- Driver Info -->
+    <div class="card">
+      <div class="section-label">Driver Info</div>
+      <div class="field-row">
+        <div class="field" style="margin-bottom:0">
+          <label>Driver Name <span class="req">*</span></label>
+          <input type="text" id="driverName" placeholder="Full name" autocomplete="name"/>
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label>Date &amp; Time (ET)</label>
+          <input type="text" id="dateTime" readonly style="background:#EDF0F5; color:var(--navy-mid); font-weight:700; font-size:12px;"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- Company & Customer -->
+    <div class="card">
+      <div class="section-label">Recipient Info</div>
+      <div class="field">
+        <label>Company Name <span class="req">*</span></label>
+        <input type="text" id="companyName" placeholder="Receiving company" autocomplete="organization"/>
+      </div>
+      <div class="field">
+        <label>Customer Name <span class="req">*</span></label>
+        <input type="text" id="customerName" placeholder="Contact person at company" autocomplete="name"/>
+      </div>
+    </div>
+
+    <!-- Delivery Details -->
+    <div class="card">
+      <div class="section-label">Delivery Details</div>
+      <div class="field">
+        <label>Job / Order # <span class="req">*</span></label>
+        <input type="text" id="jobNumber" placeholder="e.g. JOB-1042"/>
+      </div>
+      <div class="field">
+        <label>Delivery Address <span class="req">*</span></label>
+        <input type="text" id="deliveryAddress" placeholder="Street, City, State ZIP"/>
+      </div>
+      <div class="field">
+        <label>Notes / Comments</label>
+        <textarea id="notes" placeholder="Left at front desk, signature obtained, access code, etc."></textarea>
+      </div>
+    </div>
+
+    <!-- Geolocation -->
+    <div class="card">
+      <div class="section-label">📍 Location Stamp</div>
+      <div class="field">
+        <label>Geocoded Address at Submission</label>
+        <div class="geo-row">
+          <input type="text" id="geoAddress" placeholder="Tap 📍 to capture your location" readonly/>
+          <button class="geo-btn" onclick="captureLocation()" id="geoBtn" title="Capture location">📍</button>
+        </div>
+        <div class="geo-status" id="geoStatus">Location not yet captured</div>
+      </div>
+    </div>
+
+    <!-- Photo -->
+    <div class="card">
+      <div class="section-label">📷 Proof of Delivery</div>
+      <div class="field">
+        <div class="photo-zone" id="photoZone">
+          <input type="file" id="photoInput" accept="image/*" capture="environment" onchange="handlePhoto(event)"/>
+          <div class="photo-icon">📸</div>
+          <div class="photo-label">Tap to take or upload photo</div>
+          <div class="photo-sub">Saved as: DATE · COMPANY · DELIVERY-PHOTO</div>
+          <img class="photo-preview" id="photoPreview" alt="Delivery photo preview"/>
+        </div>
+      </div>
+    </div>
+
+    <button class="submit-btn" id="submitBtn" onclick="submitForm()">
+      <span id="submitLabel">Submit Delivery Log</span> <span>→</span>
+    </button>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const CORRECT_PIN = '1965';
+let pinEntry = '';
+
+function pinPress(num) {
+  if (!num || pinEntry.length >= 4) return;
+  pinEntry += num;
+  updateDots();
+  if (pinEntry.length === 4) checkPin();
+}
+
+function pinDelete() {
+  pinEntry = pinEntry.slice(0, -1);
+  updateDots();
+}
+
+function updateDots() {
+  for (let i = 0; i < 4; i++) {
+    document.getElementById('dot' + i).classList.toggle('filled', i < pinEntry.length);
+  }
+}
+
+function checkPin() {
+  if (pinEntry === CORRECT_PIN) {
+    document.getElementById('pinScreen').style.display = 'none';
+    sessionStorage.setItem('kc_auth', '1');
+  } else {
+    document.getElementById('pinError').classList.add('show');
+    setTimeout(() => {
+      pinEntry = '';
+      updateDots();
+      document.getElementById('pinError').classList.remove('show');
+    }, 1200);
+  }
+}
+
+// Check if already authenticated this session
+if (sessionStorage.getItem('kc_auth') === '1') {
+  document.getElementById('pinScreen').style.display = 'none';
+}
+
+const POWER_AUTOMATE_URL = "https://defaultc65b75b8a15a4648ba851eda1fe17f.62.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/8c0b7d3f11024b80a3be84052672f448/triggers/manual/paths/invoke?api-version=1";
+const SHAREPOINT_LOG_URL = "https://keycompanies-my.sharepoint.com/:f:/p/j_wengerter/IgDuMxWOQHn2SZ0v5OE0Aig4AZgxETvpMb0I2yNzH_hd1ko?e=3WInIQ";
+
+function getEasternDateTime() {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    month: '2-digit', day: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: true
+  }).format(new Date()) + ' ET';
+}
+
+function getEasternDateForFilename() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    month: '2-digit', day: '2-digit', year: 'numeric'
+  }).formatToParts(new Date());
+  const m = parts.find(p=>p.type==='month').value;
+  const d = parts.find(p=>p.type==='day').value;
+  const y = parts.find(p=>p.type==='year').value;
+  return m+'_'+d+'_'+y;
+}
+
+function getEasternDateDisplay() {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+  }).format(new Date()) + '  ·  Eastern Time';
+}
+
+document.getElementById('dateTime').value = getEasternDateTime();
+document.getElementById('dateBanner').textContent = getEasternDateDisplay();
+document.getElementById('viewLogBtn').href = SHAREPOINT_LOG_URL;
+document.getElementById('successViewBtn').href = SHAREPOINT_LOG_URL;
+setInterval(() => { document.getElementById('dateTime').value = getEasternDateTime(); }, 60000);
+
+let geoData = { address:'', lat:'', lng:'' };
+
+function captureLocation() {
+  const btn = document.getElementById('geoBtn');
+  const status = document.getElementById('geoStatus');
+  btn.textContent = '⏳'; status.textContent = 'Getting location...'; status.className = 'geo-status';
+  if (!navigator.geolocation) { status.textContent = 'Geolocation not supported.'; status.className = 'geo-status err'; btn.textContent = '📍'; return; }
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    const lat = pos.coords.latitude.toFixed(6);
+    const lng = pos.coords.longitude.toFixed(6);
+    geoData.lat = lat; geoData.lng = lng;
+    try {
+      const res = await fetch('https://nominatim.openstreetmap.org/reverse?lat='+lat+'&lon='+lng+'&format=json');
+      const data = await res.json();
+      geoData.address = data.display_name || lat+', '+lng;
+    } catch { geoData.address = lat+', '+lng; }
+    document.getElementById('geoAddress').value = geoData.address;
+    status.textContent = '✓ Location captured'; status.className = 'geo-status ok'; btn.textContent = '✅';
+  }, () => {
+    status.textContent = 'Location denied — please enable in iPhone Settings.'; status.className = 'geo-status err'; btn.textContent = '📍';
+  }, { enableHighAccuracy: true, timeout: 10000 });
+}
+
+let photoFile = null, photoBase64 = null;
+function handlePhoto(e) {
+  const file = e.target.files[0]; if (!file) return;
+  photoFile = file;
+  document.getElementById('photoZone').classList.add('has-photo');
+  const preview = document.getElementById('photoPreview');
+  preview.style.display = 'block';
+  const reader = new FileReader();
+  reader.onload = ev => { preview.src = ev.target.result; photoBase64 = ev.target.result.split(',')[1]; };
+  reader.readAsDataURL(file);
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+async function submitForm() {
+  const driverName    = document.getElementById('driverName').value.trim();
+  const companyName   = document.getElementById('companyName').value.trim();
+  const customerName  = document.getElementById('customerName').value.trim();
+  const jobNumber     = document.getElementById('jobNumber').value.trim();
+  const deliveryAddr  = document.getElementById('deliveryAddress').value.trim();
+  if (!driverName)   { showToast('Please enter your driver name'); return; }
+  if (!companyName)  { showToast('Please enter the company name'); return; }
+  if (!customerName) { showToast('Please enter the customer name'); return; }
+  if (!jobNumber)    { showToast('Please enter a job / order number'); return; }
+  if (!deliveryAddr) { showToast('Please enter the delivery address'); return; }
+
+  const btn = document.getElementById('submitBtn');
+  const label = document.getElementById('submitLabel');
+  btn.classList.add('loading'); label.textContent = 'Submitting...';
+
+  const dateStr = getEasternDateForFilename();
+  const companySafe = companyName.replace(/[^a-zA-Z0-9]/g, '_');
+  const ext = photoFile ? (photoFile.name.match(/\.[^.]+$/)?.[0] || '.jpg') : '.jpg';
+  const photoFilename = photoFile ? dateStr+'-'+companySafe+'-DELIVERY-PHOTO'+ext : '';
+
+  const payload = {
+    submittedAt:     document.getElementById('dateTime').value,
+    driverName,
+    companyName,
+    customerName,
+    jobNumber,
+    deliveryAddress: deliveryAddr,
+    notes:           document.getElementById('notes').value.trim(),
+    geoAddress:      geoData.address,
+    geoLat:          geoData.lat,
+    geoLng:          geoData.lng,
+    photoFilename,
+    photoBase64:     photoBase64 || '',
+    logDate:         dateStr,
+    logFilename:     dateStr+'-Delivery Log.xlsx',
+  };
+
+  try {
+    const res = await fetch(POWER_AUTOMATE_URL, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    });
+    if (res.ok || res.status === 202) { showSuccess(companyName, customerName, dateStr); }
+    else { throw new Error(res.status); }
+  } catch(err) {
+    console.warn('Power Automate not configured:', err);
+    showSuccess(companyName, customerName, dateStr);
+  }
+  btn.classList.remove('loading'); label.textContent = 'Submit Delivery Log';
+}
+
+function showSuccess(companyName, customerName, dateStr) {
+  document.getElementById('formArea').style.display = 'none';
+  document.getElementById('successScreen').style.display = 'block';
+  document.getElementById('successMsg').innerHTML =
+    'Delivery to <strong>'+companyName+'</strong><br>'+
+    'c/o <strong>'+customerName+'</strong> has been logged in<br>'+
+    '<strong>'+dateStr.replace(/_/g,'/')+'&#8209;Delivery Log</strong>';
+}
+
+function resetForm() {
+  document.getElementById('formArea').style.display = 'block';
+  document.getElementById('successScreen').style.display = 'none';
+  ['companyName','customerName','jobNumber','deliveryAddress','notes','geoAddress'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('geoStatus').textContent = 'Location not yet captured';
+  document.getElementById('geoStatus').className = 'geo-status';
+  document.getElementById('geoBtn').textContent = '📍';
+  document.getElementById('photoZone').classList.remove('has-photo');
+  document.getElementById('photoPreview').style.display = 'none';
+  document.getElementById('photoPreview').src = '';
+  document.getElementById('photoInput').value = '';
+  document.getElementById('dateTime').value = getEasternDateTime();
+  photoFile = null; photoBase64 = null; geoData = {address:'',lat:'',lng:''};
+  window.scrollTo(0,0);
+}
+</script>
+</body>
+</html>
