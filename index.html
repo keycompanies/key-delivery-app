@@ -232,6 +232,30 @@
     font-family: inherit; width: 100%; margin-top: 10px;
   }
 
+  /* ── Signature ── */
+  .sig-wrap {
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: #FAFBFD;
+    position: relative;
+  }
+  #sigCanvas {
+    display: block; width: 100%; cursor: crosshair; touch-action: none;
+  }
+  .sig-hint {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%,-50%);
+    font-size: 13px; color: #C0C8D8; pointer-events: none;
+    white-space: nowrap;
+  }
+  .sig-clear {
+    font-size: 12px; color: var(--muted); background: none; border: none;
+    cursor: pointer; padding: 6px 10px; font-family: inherit;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .sig-actions { display: flex; justify-content: flex-end; padding: 4px 6px 2px; }
+
   /* ── Toast ── */
   .toast {
     position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
@@ -370,6 +394,21 @@
       </div>
     </div>
 
+    <!-- Signature -->
+    <div class="card">
+      <div class="section-label">✍️ Recipient Signature</div>
+      <div class="field">
+        <label>Sign below <span class="req">*</span></label>
+        <div class="sig-wrap">
+          <canvas id="sigCanvas" height="130"></canvas>
+          <div class="sig-hint" id="sigHint">Sign here</div>
+        </div>
+        <div class="sig-actions">
+          <button class="sig-clear" onclick="clearSig()">✕ Clear</button>
+        </div>
+      </div>
+    </div>
+
     <button class="submit-btn" id="submitBtn" onclick="submitForm()">
       <span id="submitLabel">Submit Delivery Log</span> <span>→</span>
     </button>
@@ -380,6 +419,49 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// ── Signature ──────────────────────────────────────────────────────────────
+const sigCanvas = document.getElementById('sigCanvas');
+const sigCtx = sigCanvas.getContext('2d');
+const sigHint = document.getElementById('sigHint');
+let sigDrawing = false;
+let hasSig = false;
+
+function resizeSigCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = sigCanvas.parentElement.getBoundingClientRect().width || 300;
+  sigCanvas.width = w * dpr;
+  sigCanvas.height = 130 * dpr;
+  sigCanvas.style.width = w + 'px';
+  sigCanvas.style.height = '130px';
+  sigCtx.scale(dpr, dpr);
+  sigCtx.strokeStyle = '#0D1F3C';
+  sigCtx.lineWidth = 2;
+  sigCtx.lineCap = 'round';
+  sigCtx.lineJoin = 'round';
+}
+setTimeout(resizeSigCanvas, 100);
+
+function getSigPos(e) {
+  const r = sigCanvas.getBoundingClientRect();
+  const src = e.touches ? e.touches[0] : e;
+  return { x: src.clientX - r.left, y: src.clientY - r.top };
+}
+
+sigCanvas.addEventListener('mousedown', e => { sigDrawing = true; const p = getSigPos(e); sigCtx.beginPath(); sigCtx.moveTo(p.x, p.y); sigHint.style.display = 'none'; hasSig = true; });
+sigCanvas.addEventListener('mousemove', e => { if (!sigDrawing) return; const p = getSigPos(e); sigCtx.lineTo(p.x, p.y); sigCtx.stroke(); });
+sigCanvas.addEventListener('mouseup', () => sigDrawing = false);
+sigCanvas.addEventListener('mouseleave', () => sigDrawing = false);
+sigCanvas.addEventListener('touchstart', e => { e.preventDefault(); sigDrawing = true; const p = getSigPos(e); sigCtx.beginPath(); sigCtx.moveTo(p.x, p.y); sigHint.style.display = 'none'; hasSig = true; }, { passive: false });
+sigCanvas.addEventListener('touchmove', e => { e.preventDefault(); if (!sigDrawing) return; const p = getSigPos(e); sigCtx.lineTo(p.x, p.y); sigCtx.stroke(); }, { passive: false });
+sigCanvas.addEventListener('touchend', () => sigDrawing = false);
+
+function clearSig() {
+  sigCtx.clearRect(0, 0, sigCanvas.width / (window.devicePixelRatio||1), sigCanvas.height / (window.devicePixelRatio||1));
+  sigHint.style.display = '';
+  hasSig = false;
+}
+
+// ── PIN ────────────────────────────────────────────────────────────────────
 const CORRECT_PIN = '1965';
 let pinEntry = '';
 
@@ -507,6 +589,7 @@ async function submitForm() {
   if (!customerName) { showToast('Please enter the customer name'); return; }
   if (!jobNumber)    { showToast('Please enter a job / order number'); return; }
   if (!deliveryAddr) { showToast('Please enter the delivery address'); return; }
+  if (!hasSig)       { showToast('Please get recipient signature'); return; }
 
   const btn = document.getElementById('submitBtn');
   const label = document.getElementById('submitLabel');
@@ -516,6 +599,7 @@ async function submitForm() {
   const companySafe = companyName.replace(/[^a-zA-Z0-9]/g, '_');
   const ext = photoFile ? (photoFile.name.match(/\.[^.]+$/)?.[0] || '.jpg') : '.jpg';
   const photoFilename = photoFile ? dateStr+'-'+companySafe+'-DELIVERY-PHOTO'+ext : '';
+  const signatureBase64 = sigCanvas.toDataURL('image/png').split(',')[1];
 
   const payload = {
     submittedAt:     document.getElementById('dateTime').value,
@@ -530,6 +614,7 @@ async function submitForm() {
     geoLng:          geoData.lng,
     photoFilename,
     photoBase64:     photoBase64 || '',
+    signatureBase64,
     logDate:         dateStr,
     logFilename:     dateStr+'-Delivery Log.xlsx',
   };
@@ -568,6 +653,7 @@ function resetForm() {
   document.getElementById('photoPreview').src = '';
   document.getElementById('photoInput').value = '';
   document.getElementById('dateTime').value = getEasternDateTime();
+  clearSig();
   photoFile = null; photoBase64 = null; geoData = {address:'',lat:'',lng:''};
   window.scrollTo(0,0);
 }
