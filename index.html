@@ -523,8 +523,8 @@
     <div class="card">
       <div class="section-label">Delivery Details</div>
       <div class="field">
-        <label>Job / Order # <span class="req">*</span></label>
-        <input type="text" id="jobNumber" placeholder="e.g. JOB-1042"/>
+        <label>Invoice # <span class="req">*</span></label>
+        <input type="text" id="jobNumber" placeholder="e.g. 13552"/>
       </div>
       <div class="field">
         <label>Delivery Address <span class="req">*</span></label>
@@ -557,7 +557,7 @@
           <input type="file" id="photoInput" accept="image/*" capture="environment" onchange="handlePhoto(event)"/>
           <div class="photo-icon">📸</div>
           <div class="photo-label">Tap to take or upload photo</div>
-          <div class="photo-sub">Saved as: JOB# · DATE · COMPANY NAME</div>
+          <div class="photo-sub">Saved as: INVOICE# · DATE · COMPANY NAME</div>
           <img class="photo-preview" id="photoPreview" alt="Delivery photo preview"/>
         </div>
       </div>
@@ -591,9 +591,10 @@
 <script>
 // ══════════════════════════════════════════════════
 // PACKING SLIP OCR SCANNER
-// Reads "Ship To:" block + ticket number (Invoice/Order/
-// Quote/Packing Slip Number — same field, different label
-// depending on document stage) and auto-fills the form.
+// Reads the "Ship To:" block (ignoring "Bill To" even when
+// printed side-by-side in a separate column) and the ticket
+// number (Invoice/Order/Quote/Packing Slip Number — same
+// field, different label depending on document stage).
 // Runs entirely client-side via Tesseract.js — no backend.
 // ══════════════════════════════════════════════════
 let slipFile = null;
@@ -620,7 +621,18 @@ async function handlePackingSlip(event) {
     const resized = await resizeImageForOCR(file, 1800);
     const result = await Tesseract.recognize(resized, 'eng');
     const text = result.data.text;
-    const parsed = parsePackingSlip(text);
+    const words = result.data.words || [];
+
+    // Primary method: use word positions to isolate the Ship To column
+    // only — this is what keeps Bill To (printed alongside it) out of
+    // the result even when both blocks contain similar-looking text.
+    let parsed = null;
+    try { parsed = parseShipToColumn(words); } catch (e) { console.warn('Column parse failed:', e); }
+
+    // Fallback if position data isn't usable for some reason
+    if (!parsed) parsed = parsePackingSlipFallback(text);
+
+    parsed.jobNumber = extractTicketNumber(text);
 
     let foundCount = 0;
     if (parsed.company)   { flashFill('companyName', parsed.company); foundCount++; }
@@ -663,40 +675,148 @@ function resizeImageForOCR(file, maxDim) {
   });
 }
 
-// Parses OCR text from a Key Companies quote/order/invoice/packing slip.
-// The "Ship To:" block always lists: Contact Name, Company Name, then
-// address lines (street, suite, city/state/zip).
-function parsePackingSlip(text) {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+// ── Column-aware Ship To extraction ──
+// Groups recognized words into visual rows, but filters words down to
+// ONE column (left vs right of the page) BEFORE grouping — this is the
+// key step that keeps a side-by-side "Bill To" block from contaminating
+// the "Ship To" result, since merging rows first (then filtering) loses
+// the distinction once both columns' words share the same row object.
+function buildRows(words) {
+  if (!words || !words.length) return [];
+  const sorted = [...words].sort((a, b) => a.bbox.y0 - b.bbox.y0);
+  const avgHeight = sorted.reduce((s, w) => s + (w.bbox.y1 - w.bbox.y0), 0) / sorted.length;
+  const threshold = avgHeight * 0.6;
 
-  let idx = lines.findIndex(l => /ship\s*to/i.test(l));
-  if (idx === -1) idx = lines.findIndex(l => /bill\s*to/i.test(l));
+  const rows = [];
+  sorted.forEach(w => {
+    const cy = (w.bbox.y0 + w.bbox.y1) / 2;
+    let row = rows.find(r => Math.abs(r.cy - cy) < threshold);
+    if (!row) { row = { cy, words: [] }; rows.push(row); }
+    row.words.push(w);
+    row.cy = row.words.reduce((s, ww) => s + (ww.bbox.y0 + ww.bbox.y1) / 2, 0) / row.words.length;
+  });
 
-  let customer = '', company = '', address = '';
-  if (idx !== -1) {
-    const firstLine = lines[idx].replace(/.*?(ship|bill)\s*to:?/i, '').trim();
-    const collected = [];
-    if (firstLine) collected.push(firstLine);
-    for (let j = idx + 1; j < lines.length && collected.length < 5; j++) {
-      const l = lines[j];
-      if (/^(bill to|ship to|#\s*of cartons|promised|project\s*:|sales rep|item code|ordered by)/i.test(l)) break;
-      collected.push(l);
+  return rows.map(r => {
+    const ws = [...r.words].sort((a, b) => a.bbox.x0 - b.bbox.x0);
+    return {
+      text: ws.map(w => w.text).join(' '),
+      bbox: {
+        x0: Math.min(...ws.map(w => w.bbox.x0)),
+        x1: Math.max(...ws.map(w => w.bbox.x1)),
+        y0: Math.min(...ws.map(w => w.bbox.y0)),
+        y1: Math.max(...ws.map(w => w.bbox.y1)),
+      }
+    };
+  }).sort((a, b) => a.bbox.y0 - b.bbox.y0);
+}
+
+// Finds a "<Label> To" pair, whether OCR'd as one token ("ShipTo:") or two ("Ship" "To:")
+function findLabelPos(words, label) {
+  for (let i = 0; i < words.length; i++) {
+    const t = words[i].text;
+    if (new RegExp('^' + label + '\\s*to:?$', 'i').test(t)) {
+      return { x0: words[i].bbox.x0, y0: words[i].bbox.y0, y1: words[i].bbox.y1 };
     }
-    customer = collected[0] || '';
-    company  = collected[1] || '';
-    address  = collected.slice(2).join(', ');
+    if (new RegExp('^' + label + '$', 'i').test(t)) {
+      const next = words[i + 1];
+      if (next && /^to:?$/i.test(next.text)) {
+        return { x0: words[i].bbox.x0, y0: words[i].bbox.y0, y1: words[i].bbox.y1 };
+      }
+    }
+  }
+  return null;
+}
+
+function parseShipToColumn(words) {
+  const shipPos = findLabelPos(words, 'ship');
+  const billPos = findLabelPos(words, 'bill');
+  if (!shipPos) return null; // caller falls back to plain-text method
+
+  let colSplitX = null, shipIsRight = true;
+  if (billPos) {
+    colSplitX = (shipPos.x0 + billPos.x0) / 2;
+    shipIsRight = shipPos.x0 > billPos.x0;
   }
 
-  // Ticket number: same field, relabeled by document stage.
-  // Priority: Invoice > Order > Quote > Packing Slip > PO (customer's own ref, lowest priority)
-  const jobNumber =
+  // Keep only this column's words, and only from the label downward —
+  // filtering happens BEFORE row-grouping so columns never get merged.
+  const columnWords = words
+    .filter(w => colSplitX === null ? true : (shipIsRight ? w.bbox.x0 >= colSplitX : w.bbox.x0 <= colSplitX))
+    .filter(w => w.bbox.y0 >= shipPos.y0 - 5);
+
+  const rows = buildRows(columnWords);
+  if (!rows.length) return null;
+  const shipRow = rows.find(r => r.bbox.y0 <= shipPos.y1 + 5 && r.bbox.y0 >= shipPos.y0 - 5) || rows[0];
+
+  const stopRe = /^(#\s*of cartons|promised|project\s*:|sales rep|item code|ordered by|terms\s*:)/i;
+  const blockLines = [];
+  const lineHeight = Math.max(1, shipRow.bbox.y1 - shipRow.bbox.y0);
+  let lastY = shipRow.bbox.y1;
+
+  for (const row of rows) {
+    if (row.bbox.y0 <= shipPos.y0) continue; // the label's own row is handled separately below
+    if (stopRe.test(row.text)) break;
+    if (row.bbox.y0 - lastY > lineHeight * 2.2) break; // big vertical gap = end of block
+    blockLines.push(row.text.trim());
+    lastY = row.bbox.y1;
+    if (blockLines.length >= 6) break;
+  }
+
+  // Same-line content after the label (e.g. "Ship To:  AARON SZABO")
+  const sameLine = shipRow.text.replace(/.*?ship\s*to:?/i, '').trim();
+  if (sameLine) blockLines.unshift(sameLine);
+
+  return assembleFields(blockLines);
+}
+
+// Decides customer/company/address from the collected Ship To lines.
+// An explicit "Attn:" line, if present, always wins for customer name.
+function assembleFields(blockLines) {
+  let customer = '', company = '', address = '';
+  const attnIdx = blockLines.findIndex(l => /\battn\.?:?\s*\S/i.test(l));
+  if (attnIdx !== -1) {
+    customer = blockLines[attnIdx].replace(/.*?attn\.?:?/i, '').trim();
+    const remaining = blockLines.filter((_, i) => i !== attnIdx);
+    company = remaining[0] || '';
+    address = remaining.slice(1).join(', ');
+  } else {
+    customer = blockLines[0] || '';
+    company  = blockLines[1] || '';
+    address  = blockLines.slice(2).join(', ');
+  }
+  return { customer, company, address };
+}
+
+// Fallback used only if word-position data isn't available — same logic
+// as before, operating on plain OCR text. Less reliable when Bill To and
+// Ship To sit side-by-side, since it can't tell columns apart.
+function parsePackingSlipFallback(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  let idx = lines.findIndex(l => /ship\s*to/i.test(l));
+  if (idx === -1) idx = lines.findIndex(l => /bill\s*to/i.test(l));
+  if (idx === -1) return { customer: '', company: '', address: '' };
+
+  const firstLine = lines[idx].replace(/.*?(ship|bill)\s*to:?/i, '').trim();
+  const collected = [];
+  if (firstLine) collected.push(firstLine);
+  for (let j = idx + 1; j < lines.length && collected.length < 5; j++) {
+    const l = lines[j];
+    if (/^(bill to|ship to|#\s*of cartons|promised|project\s*:|sales rep|item code|ordered by)/i.test(l)) break;
+    collected.push(l);
+  }
+  return assembleFields(collected);
+}
+
+// Ticket number: same field, relabeled by document stage.
+// Priority: Invoice > Order > Quote > Packing Slip > PO (customer's own ref, lowest priority)
+function extractTicketNumber(text) {
+  return (
     findLabeledNumber(text, 'Invoice') ||
     findLabeledNumber(text, 'Order') ||
     findLabeledNumber(text, 'Quote') ||
     findLabeledNumber(text, 'Packing\\s*Slip') ||
-    findLabeledNumber(text, 'PO');
-
-  return { customer, company, address, jobNumber };
+    findLabeledNumber(text, 'PO')
+  );
 }
 
 function findLabeledNumber(text, label) {
@@ -978,7 +1098,7 @@ async function submitForm() {
   if (!driverName)   { showToast('Please enter your driver name'); return; }
   if (!companyName)  { showToast('Please enter the company name'); return; }
   if (!customerName) { showToast('Please enter the customer name'); return; }
-  if (!jobNumber)    { showToast('Please enter a job / order number'); return; }
+  if (!jobNumber)    { showToast('Please enter an invoice number'); return; }
   if (!deliveryAddr) { showToast('Please enter the delivery address'); return; }
 
   const btn = document.getElementById('submitBtn');
@@ -1146,13 +1266,13 @@ async function fetchLog() {
     let html = `<div class="log-count">${rows.length} deliver${rows.length===1?'y':'ies'} today</div>`;
     html += `<div class="log-table-wrap"><table class="log-table">
       <thead><tr>
-        <th>Order #</th><th>Time</th><th>Company</th><th>Address</th>
+        <th>Invoice #</th><th>Time</th><th>Company</th><th>Address</th>
       </tr></thead><tbody>`;
 
     reversed.forEach((row, i) => {
       const submitted = row['Submitted At (ET)'] || '';
       const timePart = submitted.includes(',') ? submitted.split(',').slice(1).join(',').trim().replace(' ET','') : submitted;
-      const job = row['Job / Order #'] || '—';
+      const job = row['Invoice #'] || '—';
       const company = row['Company Name'] || '';
       const address = row['Delivery Address (Geocoded)'] || '';
       const customer = row['Customer Name'] || '';
