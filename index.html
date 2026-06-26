@@ -729,19 +729,19 @@ function findLabelPos(words, label) {
 
 function parseShipToColumn(words) {
   const shipPos = findLabelPos(words, 'ship');
-  const billPos = findLabelPos(words, 'bill');
   if (!shipPos) return null; // caller falls back to plain-text method
 
-  let colSplitX = null, shipIsRight = true;
-  if (billPos) {
-    colSplitX = (shipPos.x0 + billPos.x0) / 2;
-    shipIsRight = shipPos.x0 > billPos.x0;
-  }
+  // Boundary is "Ship To:" own left edge — anything starting to the left
+  // of it is excluded outright, regardless of where "Bill To" sits. A
+  // small tolerance absorbs minor OCR jitter in word positions.
+  const TOLERANCE = 12;
+  const colSplitX = shipPos.x0 - TOLERANCE;
 
-  // Keep only this column's words, and only from the label downward —
-  // filtering happens BEFORE row-grouping so columns never get merged.
+  // Keep only words to the right of "Ship To:", and only from the label
+  // downward — filtering happens BEFORE row-grouping so columns never
+  // get merged into a single row object.
   const columnWords = words
-    .filter(w => colSplitX === null ? true : (shipIsRight ? w.bbox.x0 >= colSplitX : w.bbox.x0 <= colSplitX))
+    .filter(w => w.bbox.x0 >= colSplitX)
     .filter(w => w.bbox.y0 >= shipPos.y0 - 5);
 
   const rows = buildRows(columnWords);
