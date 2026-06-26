@@ -332,41 +332,79 @@
   .log-empty-sub { font-size: 13px; color: var(--muted); }
   .log-count {
     font-size: 11px; font-weight: 800; letter-spacing: 0.8px;
-    text-transform: uppercase; color: var(--orange); margin-bottom: 12px;
+    text-transform: uppercase; color: var(--orange); margin-bottom: 10px;
   }
-  .log-entry {
+
+  /* ── Log Table ── */
+  .log-table-wrap {
     background: var(--card); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 14px 16px;
-    margin-bottom: 10px; box-shadow: 0 1px 4px rgba(13,31,60,0.06);
+    border-radius: var(--radius); overflow: hidden;
+    box-shadow: 0 1px 4px rgba(13,31,60,0.06);
   }
-  .log-entry-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-  .log-entry-time { font-size: 11px; color: var(--muted); font-weight: 600; }
-  .log-entry-status {
-    background: var(--success-bg); color: var(--success);
+  table.log-table { width: 100%; border-collapse: collapse; }
+  .log-table thead th {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--navy); color: rgba(255,255,255,0.85);
     font-size: 10px; font-weight: 800; letter-spacing: 0.5px;
-    text-transform: uppercase; padding: 3px 8px; border-radius: 10px;
+    text-transform: uppercase; text-align: left;
+    padding: 9px 8px;
   }
-  .log-entry-company { font-size: 15px; font-weight: 800; color: var(--navy); margin-bottom: 2px; }
-  .log-entry-customer { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-  .log-entry-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; align-items: center; }
-  .log-entry-chip {
-    background: var(--bg); border: 1px solid var(--border);
-    border-radius: 6px; padding: 3px 8px;
-    font-size: 11px; color: var(--steel); font-weight: 600;
+  .log-table thead th:first-child { padding-left: 12px; }
+  .log-table tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
   }
-  .log-entry-driver { font-size: 11px; color: var(--steel-light); margin-top: 4px; }
+  .log-table tbody tr:last-child { border-bottom: none; }
+  .log-table tbody tr:active { background: var(--orange-bg); }
+  .log-table tbody tr.expanded { background: var(--surface); }
+  .log-table td {
+    padding: 10px 8px; font-size: 12.5px; color: var(--text);
+    vertical-align: top; line-height: 1.35;
+  }
+  .log-table td:first-child { padding-left: 12px; font-weight: 700; color: var(--navy-mid); white-space: nowrap; }
+  .log-td-time { white-space: nowrap; color: var(--muted); font-size: 11.5px; }
+  .log-td-company { font-weight: 700; color: var(--navy); }
+  .log-td-address { color: var(--steel); }
+  .log-expand-icon { color: var(--steel-light); font-size: 10px; float: right; }
+
+  .log-detail-row td {
+    padding: 0 12px 14px;
+    background: var(--surface);
+  }
+  .log-detail-box {
+    border-top: 1px dashed var(--border);
+    padding-top: 10px; font-size: 12px; color: var(--steel);
+  }
+  .log-detail-line { margin-bottom: 5px; }
+  .log-detail-line b { color: var(--navy); }
+  .log-detail-links { display: flex; gap: 14px; margin-top: 6px; }
   .log-photo-link {
     display: inline-flex; align-items: center; gap: 3px;
-    color: var(--orange); font-size: 11px; font-weight: 700; text-decoration: none;
+    color: var(--orange); font-size: 12px; font-weight: 700; text-decoration: none;
   }
   .log-refresh-btn {
     display: flex; align-items: center; justify-content: center; gap: 6px;
     width: 100%; background: none; border: 1.5px solid var(--border);
     border-radius: var(--radius); padding: 12px; font-size: 13px; font-weight: 700;
-    color: var(--muted); cursor: pointer; font-family: inherit; margin-top: 8px;
+    color: var(--muted); cursor: pointer; font-family: inherit; margin-top: 10px;
+  }
+
+  /* ── Packing Slip Scanner ── */
+  input[type=text], input[type=email], textarea {
+    transition: border-color 0.3s, box-shadow 0.3s, background-color 0.8s;
+  }
+  .autofilled {
+    border-color: var(--orange) !important;
+    background: var(--orange-bg) !important;
+    box-shadow: 0 0 0 3px rgba(224,122,47,0.18) !important;
+  }
+  .slip-sub-hint {
+    font-size: 10px; color: var(--steel-light); margin-top: 3px; letter-spacing: 0.2px;
+    text-align: center; padding: 0 10px;
   }
 </style>
 </head>
+
 <body>
 
 <!-- PIN SCREEN -->
@@ -453,6 +491,21 @@
       </div>
     </div>
 
+    <!-- Packing Slip Scanner -->
+    <div class="card">
+      <div class="section-label">📄 Scan Packing Slip <span style="text-transform:none;font-weight:600;color:var(--steel-light);">&nbsp;(optional)</span></div>
+      <div class="field" style="margin-bottom:0">
+        <div class="photo-zone" id="slipZone">
+          <input type="file" id="slipInput" accept="image/*" capture="environment" onchange="handlePackingSlip(event)"/>
+          <div class="photo-icon">📄</div>
+          <div class="photo-label">Tap to scan a packing slip or invoice</div>
+          <div class="photo-sub">Auto-fills company, customer, address &amp; ticket #</div>
+          <img class="photo-preview" id="slipPreview" alt="Packing slip preview"/>
+        </div>
+        <div class="geo-status" id="slipStatus" style="margin-top:8px;"></div>
+      </div>
+    </div>
+
     <!-- Company & Customer -->
     <div class="card">
       <div class="section-label">Recipient Info</div>
@@ -534,7 +587,137 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
+// ══════════════════════════════════════════════════
+// PACKING SLIP OCR SCANNER
+// Reads "Ship To:" block + ticket number (Invoice/Order/
+// Quote/Packing Slip Number — same field, different label
+// depending on document stage) and auto-fills the form.
+// Runs entirely client-side via Tesseract.js — no backend.
+// ══════════════════════════════════════════════════
+let slipFile = null;
+
+async function handlePackingSlip(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  slipFile = file;
+
+  const zone = document.getElementById('slipZone');
+  const status = document.getElementById('slipStatus');
+  const preview = document.getElementById('slipPreview');
+
+  zone.classList.add('has-photo');
+  preview.style.display = 'block';
+  const reader = new FileReader();
+  reader.onload = ev => { preview.src = ev.target.result; };
+  reader.readAsDataURL(file);
+
+  status.textContent = '🔍 Reading document… (first scan loads the OCR engine, may take a few extra seconds)';
+  status.className = 'geo-status';
+
+  try {
+    const resized = await resizeImageForOCR(file, 1800);
+    const result = await Tesseract.recognize(resized, 'eng');
+    const text = result.data.text;
+    const parsed = parsePackingSlip(text);
+
+    let foundCount = 0;
+    if (parsed.company)   { flashFill('companyName', parsed.company); foundCount++; }
+    if (parsed.customer)  { flashFill('customerName', parsed.customer); foundCount++; }
+    if (parsed.address)   { flashFill('deliveryAddress', parsed.address); foundCount++; }
+    if (parsed.jobNumber) { flashFill('jobNumber', parsed.jobNumber); foundCount++; }
+
+    if (foundCount > 0) {
+      status.textContent = '✅ Autofilled ' + foundCount + ' field' + (foundCount===1?'':'s') + ' — please verify below before submitting';
+      status.className = 'geo-status ok';
+    } else {
+      status.textContent = '⚠️ Could not find a "Ship To" section — please fill in manually';
+      status.className = 'geo-status err';
+    }
+  } catch (err) {
+    console.warn('OCR error:', err);
+    status.textContent = '⚠️ Could not read document — please fill in manually';
+    status.className = 'geo-status err';
+  }
+}
+
+// Downscale large photos so OCR runs faster on mobile
+function resizeImageForOCR(file, maxDim) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      canvas.toBlob(blob => { URL.revokeObjectURL(url); resolve(blob); }, 'image/jpeg', 0.92);
+    };
+    img.src = url;
+  });
+}
+
+// Parses OCR text from a Key Companies quote/order/invoice/packing slip.
+// The "Ship To:" block always lists: Contact Name, Company Name, then
+// address lines (street, suite, city/state/zip).
+function parsePackingSlip(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  let idx = lines.findIndex(l => /ship\s*to/i.test(l));
+  if (idx === -1) idx = lines.findIndex(l => /bill\s*to/i.test(l));
+
+  let customer = '', company = '', address = '';
+  if (idx !== -1) {
+    const firstLine = lines[idx].replace(/.*?(ship|bill)\s*to:?/i, '').trim();
+    const collected = [];
+    if (firstLine) collected.push(firstLine);
+    for (let j = idx + 1; j < lines.length && collected.length < 5; j++) {
+      const l = lines[j];
+      if (/^(bill to|ship to|#\s*of cartons|promised|project\s*:|sales rep|item code|ordered by)/i.test(l)) break;
+      collected.push(l);
+    }
+    customer = collected[0] || '';
+    company  = collected[1] || '';
+    address  = collected.slice(2).join(', ');
+  }
+
+  // Ticket number: same field, relabeled by document stage.
+  // Priority: Invoice > Order > Quote > Packing Slip > PO (customer's own ref, lowest priority)
+  const jobNumber =
+    findLabeledNumber(text, 'Invoice') ||
+    findLabeledNumber(text, 'Order') ||
+    findLabeledNumber(text, 'Quote') ||
+    findLabeledNumber(text, 'Packing\\s*Slip') ||
+    findLabeledNumber(text, 'PO');
+
+  return { customer, company, address, jobNumber };
+}
+
+function findLabeledNumber(text, label) {
+  // Number/No./# suffix is required (not optional) — otherwise "Quote"
+  // matches the bare document title word ("QUOTE") instead of the
+  // actual "Quote Number" field further down the page.
+  // [^\d\n] (not digit, not newline) keeps the match from crossing into
+  // the next line when a field is printed blank (e.g. an empty PO Number)
+  const re = new RegExp(label + '\\s*(Number|No\\.?|#)[^\\d\\n]{0,8}([A-Za-z0-9\\-]{3,})', 'i');
+  const m = text.match(re);
+  if (m && m[2] && /\d/.test(m[2])) return m[2];
+  return '';
+}
+
+function flashFill(id, value) {
+  const el = document.getElementById(id);
+  el.value = value;
+  el.classList.add('autofilled');
+  setTimeout(() => el.classList.remove('autofilled'), 2000);
+}
+
 // ══════════════════════════════════════════════════
 // DRIVER PIN CONFIGURATION
 // Add each driver's 4-digit PIN and their full name.
@@ -884,6 +1067,15 @@ function resetForm() {
     photoFile = null; photoBase64 = null;
   geoData = { address:'', lat:'', lng:'' };
   clearSig();
+
+  // Clear packing slip scanner
+  document.getElementById('slipZone').classList.remove('has-photo');
+  document.getElementById('slipPreview').style.display = 'none';
+  document.getElementById('slipPreview').src = '';
+  document.getElementById('slipInput').value = '';
+  document.getElementById('slipStatus').textContent = '';
+  slipFile = null;
+
   window.scrollTo(0, 0);
 }
 
@@ -903,6 +1095,16 @@ function showLog() {
 
 function hideLog() {
   document.getElementById('logOverlay').classList.remove('open');
+}
+
+function toggleLogDetail(i) {
+  const detail = document.getElementById('logDetail' + i);
+  const row = document.getElementById('logRow' + i);
+  const isOpen = detail.style.display !== 'none';
+  detail.style.display = isOpen ? 'none' : 'table-row';
+  row.classList.toggle('expanded', !isOpen);
+  const icon = row.querySelector('.log-expand-icon');
+  if (icon) icon.textContent = isOpen ? '▾' : '▴';
 }
 
 async function fetchLog() {
@@ -942,13 +1144,18 @@ async function fetchLog() {
 
     const reversed = [...rows].reverse();
     let html = `<div class="log-count">${rows.length} deliver${rows.length===1?'y':'ies'} today</div>`;
+    html += `<div class="log-table-wrap"><table class="log-table">
+      <thead><tr>
+        <th>Order #</th><th>Time</th><th>Company</th><th>Address</th>
+      </tr></thead><tbody>`;
 
-    reversed.forEach(row => {
+    reversed.forEach((row, i) => {
       const submitted = row['Submitted At (ET)'] || '';
-      const timePart = submitted.includes(',') ? submitted.split(',').slice(1).join(',').trim() : submitted;
+      const timePart = submitted.includes(',') ? submitted.split(',').slice(1).join(',').trim().replace(' ET','') : submitted;
+      const job = row['Job / Order #'] || '—';
       const company = row['Company Name'] || '';
+      const address = row['Delivery Address (Geocoded)'] || '';
       const customer = row['Customer Name'] || '';
-      const job = row['Job / Order #'] || '';
       const driver = row['Driver Name'] || '';
       const status = row['Status'] || 'Delivered';
       const photoUrl = row['SharePoint Link'] || '';
@@ -956,23 +1163,28 @@ async function fetchLog() {
       const notes = row['Notes / Comments'] || '';
 
       html += `
-        <div class="log-entry">
-          <div class="log-entry-header">
-            <div class="log-entry-time">${timePart}</div>
-            <div class="log-entry-status">✓ ${status}</div>
-          </div>
-          <div class="log-entry-company">${company}</div>
-          <div class="log-entry-customer">${customer}</div>
-          <div class="log-entry-row">
-            <span class="log-entry-chip">Job: ${job}</span>
-            ${photoUrl ? `<a class="log-photo-link" href="${photoUrl}" target="_blank">📷 Photo</a>` : ''}
-            ${sigUrl ? `<a class="log-photo-link" href="${sigUrl}" target="_blank">✍️ Sig</a>` : ''}
-          </div>
-          ${notes ? `<div class="log-entry-chip" style="display:inline-block;margin-bottom:4px;">💬 ${notes}</div>` : ''}
-          <div class="log-entry-driver">Driver: ${driver}</div>
-        </div>`;
+        <tr id="logRow${i}" onclick="toggleLogDetail(${i})">
+          <td>${job}</td>
+          <td class="log-td-time">${timePart}</td>
+          <td class="log-td-company">${company}</td>
+          <td class="log-td-address">${address}<span class="log-expand-icon">▾</span></td>
+        </tr>
+        <tr class="log-detail-row" id="logDetail${i}" style="display:none;">
+          <td colspan="4">
+            <div class="log-detail-box">
+              <div class="log-detail-line"><b>Customer:</b> ${customer || '—'}</div>
+              <div class="log-detail-line"><b>Driver:</b> ${driver} &nbsp;·&nbsp; <b>Status:</b> ✓ ${status}</div>
+              ${notes ? `<div class="log-detail-line"><b>Notes:</b> ${notes}</div>` : ''}
+              <div class="log-detail-links">
+                ${photoUrl ? `<a class="log-photo-link" href="${photoUrl}" target="_blank">📷 View Photo</a>` : ''}
+                ${sigUrl ? `<a class="log-photo-link" href="${sigUrl}" target="_blank">✍️ View Signature</a>` : ''}
+              </div>
+            </div>
+          </td>
+        </tr>`;
     });
 
+    html += `</tbody></table></div>`;
     html += `<button class="log-refresh-btn" onclick="fetchLog()">↻ Refresh</button>`;
     entries.innerHTML = html;
 
