@@ -685,7 +685,11 @@ function buildRows(words) {
   if (!words || !words.length) return [];
   const sorted = [...words].sort((a, b) => a.bbox.y0 - b.bbox.y0);
   const avgHeight = sorted.reduce((s, w) => s + (w.bbox.y1 - w.bbox.y0), 0) / sorted.length;
-  const threshold = avgHeight * 0.6;
+  // Tighter than before (was 0.6x) — a looser threshold can merge two
+  // genuinely separate printed lines into one row on tightly-spaced or
+  // slightly skewed phone photos, which shifts every field down by one
+  // (customer name lands in the company field, etc).
+  const threshold = avgHeight * 0.45;
 
   const rows = [];
   sorted.forEach(w => {
@@ -762,9 +766,12 @@ function parseShipToColumn(words) {
     if (blockLines.length >= 6) break;
   }
 
-  // Same-line content after the label (e.g. "Ship To:  AARON SZABO")
+  // Same-line content after the label (e.g. "Ship To:  AARON SZABO").
+  // Require at least 2 letters so a stray OCR artifact (a misread colon,
+  // border line, etc.) can't get treated as real content and shift every
+  // field down by one position.
   const sameLine = shipRow.text.replace(/.*?ship\s*to:?/i, '').trim();
-  if (sameLine) blockLines.unshift(sameLine);
+  if (sameLine && /[A-Za-z]{2,}/.test(sameLine)) blockLines.unshift(sameLine);
 
   return assembleFields(blockLines);
 }
