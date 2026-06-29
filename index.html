@@ -219,29 +219,55 @@
     border-radius: var(--radius-sm);
     background: #fff;
     overflow: hidden;
-    transition: border-color 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    position: relative;
+    box-shadow: inset 0 1px 4px rgba(13,31,60,0.04);
   }
-  .sig-wrap.has-sig { border-color: var(--orange); }
+  .sig-wrap.has-sig { border-color: var(--orange); box-shadow: inset 0 1px 4px rgba(224,122,47,0.08); }
   #sigCanvas {
     display: block;
     width: 100%;
-    height: 150px;
+    height: 240px;
     cursor: crosshair;
     touch-action: none;
+    position: relative;
+    z-index: 1;
+  }
+  .sig-placeholder {
+    position: absolute;
+    top: 0; left: 0; right: 0; height: 240px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px;
+    color: var(--border);
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .sig-wrap.has-sig .sig-placeholder { opacity: 0; }
+  .sig-placeholder-icon { font-size: 28px; opacity: 0.6; }
+  .sig-placeholder-text {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.3px;
+    color: var(--steel-light); text-transform: uppercase;
+  }
+  .sig-baseline {
+    position: absolute;
+    left: 24px; right: 24px; bottom: 56px;
+    border-bottom: 2px dashed var(--border);
+    pointer-events: none;
   }
   .sig-footer {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 7px 12px;
+    padding: 10px 14px;
     background: var(--surface);
     border-top: 1px solid var(--border);
   }
-  .sig-hint { font-size: 10px; color: var(--steel-light); letter-spacing: 0.3px; }
+  .sig-hint { font-size: 11px; color: var(--steel-light); letter-spacing: 0.3px; font-weight: 600; }
   .sig-clear-btn {
-    background: none;
-    border: 1px solid var(--border);
+    display: flex; align-items: center; gap: 5px;
+    background: #fff;
+    border: 1.5px solid var(--border);
     border-radius: var(--radius-xs);
-    padding: 4px 12px;
-    font-size: 11px; font-weight: 700;
+    padding: 8px 16px;
+    font-size: 13px; font-weight: 700;
     color: var(--muted);
     cursor: pointer;
     font-family: inherit;
@@ -570,9 +596,14 @@
         <label>Have the recipient sign below</label>
         <div class="sig-wrap" id="sigWrap">
           <canvas id="sigCanvas"></canvas>
+          <div class="sig-baseline"></div>
+          <div class="sig-placeholder" id="sigPlaceholder">
+            <div class="sig-placeholder-icon">✕</div>
+            <div class="sig-placeholder-text">Sign Here</div>
+          </div>
           <div class="sig-footer">
-            <span class="sig-hint">SIGN ABOVE · DRAW WITH FINGER OR STYLUS</span>
-            <button class="sig-clear-btn" onclick="clearSig()">Clear</button>
+            <span class="sig-hint">Use your finger or a stylus</span>
+            <button class="sig-clear-btn" onclick="clearSig()">🗑️ Clear</button>
           </div>
         </div>
       </div>
@@ -1025,10 +1056,17 @@ let sigHasContent = false;
 
 function initSigCanvas() {
   const rect = sigCanvas.parentElement.getBoundingClientRect();
-  sigCanvas.width = rect.width;
-  sigCanvas.height = 150;
+  const dpr = window.devicePixelRatio || 1;
+  const displayHeight = 240;
+  // Render at device pixel ratio so signatures stay crisp on phone screens
+  sigCanvas.width = rect.width * dpr;
+  sigCanvas.height = displayHeight * dpr;
+  sigCanvas.style.width = rect.width + 'px';
+  sigCanvas.style.height = displayHeight + 'px';
+  sigCtx.setTransform(1, 0, 0, 1, 0, 0); // reset before scaling — avoids compounding on resize
+  sigCtx.scale(dpr, dpr);
   sigCtx.strokeStyle = '#0D1F3C';
-  sigCtx.lineWidth = 2.5;
+  sigCtx.lineWidth = 3;
   sigCtx.lineCap = 'round';
   sigCtx.lineJoin = 'round';
 }
