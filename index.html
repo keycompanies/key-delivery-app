@@ -351,6 +351,34 @@
     cursor: pointer; font-family: inherit;
   }
   .log-body { flex: 1; overflow-y: auto; padding: 16px; max-width: 480px; margin: 0 auto; width: 100%; }
+  .log-filter-bar {
+    position: sticky; top: -16px; z-index: 5;
+    margin: -16px -16px 14px;
+    padding: 12px 16px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .log-filter-label {
+    font-size: 11px; font-weight: 800; letter-spacing: 0.4px;
+    text-transform: uppercase; color: var(--steel-light); flex-shrink: 0;
+  }
+  .log-filter-select {
+    flex: 1;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-xs);
+    background: var(--surface);
+    color: var(--navy);
+    font-size: 13px; font-weight: 700;
+    padding: 7px 10px;
+    font-family: inherit;
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235A6E88' stroke-width='2.5'%3e%3cpolyline points='6 9 12 15 18 9'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 16px;
+    padding-right: 30px;
+  }
   .log-loading { text-align: center; padding: 60px 20px; color: var(--muted); font-size: 14px; }
   .log-empty { text-align: center; padding: 60px 20px; }
   .log-empty-icon { font-size: 40px; margin-bottom: 12px; }
@@ -471,6 +499,10 @@
     <button class="log-close-btn" onclick="hideLog()">✕ Close</button>
   </div>
   <div class="log-body">
+    <div class="log-filter-bar">
+      <span class="log-filter-label">Showing</span>
+      <select id="logDriverFilter" class="log-filter-select" onchange="applyDriverFilter()"></select>
+    </div>
     <div class="log-loading" id="logLoading">Loading entries…</div>
     <div id="logEntries"></div>
   </div>
@@ -1272,6 +1304,113 @@ function toggleLogDetail(i) {
   if (icon) icon.textContent = isOpen ? '▾' : '▴';
 }
 
+// All of today's rows, cached after fetch, so switching the driver
+// filter is instant and doesn't need another network call.
+let allTodayRows = [];
+let logDriverFilterValue = 'all';
+
+function getTodayET() {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', month: '2-digit', day: '2-digit', year: 'numeric'
+  }).format(new Date());
+}
+
+function buildDriverFilterOptions() {
+  const select = document.getElementById('logDriverFilter');
+  const loggedInDriver = sessionStorage.getItem('kc_driver') || '';
+  const allDriverNames = [...new Set(Object.values(DRIVERS))].sort();
+
+  let optionsHtml = '';
+  if (loggedInDriver) {
+    optionsHtml += `<option value="__me__">👤 My Deliveries (${loggedInDriver})</option>`;
+  }
+  optionsHtml += `<option value="all">👥 All Drivers</option>`;
+  allDriverNames.forEach(name => {
+    optionsHtml += `<option value="${name}">${name}</option>`;
+  });
+  select.innerHTML = optionsHtml;
+
+  // Default to the logged-in driver's own deliveries if available
+  logDriverFilterValue = loggedInDriver ? '__me__' : 'all';
+  select.value = logDriverFilterValue;
+}
+
+function applyDriverFilter() {
+  logDriverFilterValue = document.getElementById('logDriverFilter').value;
+  renderLogRows();
+}
+
+function renderLogRows() {
+  const entries = document.getElementById('logEntries');
+  const loggedInDriver = sessionStorage.getItem('kc_driver') || '';
+
+  let rows = allTodayRows;
+  let filterLabel = "today";
+  if (logDriverFilterValue === '__me__') {
+    rows = rows.filter(r => (r['Driver Name'] || '') === loggedInDriver);
+    filterLabel = `for ${loggedInDriver} today`;
+  } else if (logDriverFilterValue !== 'all') {
+    rows = rows.filter(r => (r['Driver Name'] || '') === logDriverFilterValue);
+    filterLabel = `for ${logDriverFilterValue} today`;
+  }
+
+  if (!rows.length) {
+    entries.innerHTML = `
+      <div class="log-empty">
+        <div class="log-empty-icon">📭</div>
+        <div class="log-empty-title">No deliveries ${filterLabel}</div>
+        <div class="log-empty-sub">Entries will appear here as drivers submit the form</div>
+      </div>`;
+    return;
+  }
+
+  const reversed = [...rows].reverse();
+  let html = `<div class="log-count">${rows.length} deliver${rows.length===1?'y':'ies'} ${filterLabel}</div>`;
+  html += `<div class="log-table-wrap"><table class="log-table">
+    <thead><tr>
+      <th>Invoice #</th><th>Time</th><th>Company</th><th>Address</th>
+    </tr></thead><tbody>`;
+
+  reversed.forEach((row, i) => {
+    const submitted = row['Submitted At (ET)'] || '';
+    const timePart = submitted.includes(',') ? submitted.split(',').slice(1).join(',').trim().replace(' ET','') : submitted;
+    const job = row['Invoice #'] || '—';
+    const company = row['Company Name'] || '';
+    const address = row['Delivery Address (Geocoded)'] || '';
+    const customer = row['Customer Name'] || '';
+    const driver = row['Driver Name'] || '';
+    const status = row['Status'] || 'Delivered';
+    const photoUrl = row['SharePoint Link'] || '';
+    const sigUrl = row['Recipient Signature'] || '';
+    const notes = row['Notes / Comments'] || '';
+
+    html += `
+      <tr id="logRow${i}" onclick="toggleLogDetail(${i})">
+        <td>${job}</td>
+        <td class="log-td-time">${timePart}</td>
+        <td class="log-td-company">${company}</td>
+        <td class="log-td-address">${address}<span class="log-expand-icon">▾</span></td>
+      </tr>
+      <tr class="log-detail-row" id="logDetail${i}" style="display:none;">
+        <td colspan="4">
+          <div class="log-detail-box">
+            <div class="log-detail-line"><b>Customer:</b> ${customer || '—'}</div>
+            <div class="log-detail-line"><b>Driver:</b> ${driver} &nbsp;·&nbsp; <b>Status:</b> ✓ ${status}</div>
+            ${notes ? `<div class="log-detail-line"><b>Notes:</b> ${notes}</div>` : ''}
+            <div class="log-detail-links">
+              ${photoUrl ? `<a class="log-photo-link" href="${photoUrl}" target="_blank">📷 View Photo</a>` : ''}
+              ${sigUrl ? `<a class="log-photo-link" href="${sigUrl}" target="_blank">✍️ View Signature</a>` : ''}
+            </div>
+          </div>
+        </td>
+      </tr>`;
+  });
+
+  html += `</tbody></table></div>`;
+  html += `<button class="log-refresh-btn" onclick="fetchLog()">↻ Refresh</button>`;
+  entries.innerHTML = html;
+}
+
 async function fetchLog() {
   const loading = document.getElementById('logLoading');
   const entries = document.getElementById('logEntries');
@@ -1293,65 +1432,15 @@ async function fetchLog() {
       body: JSON.stringify({})
     });
     const data = await res.json();
-    const rows = Array.isArray(data) ? data : (data.value || data.entries || []);
+    const allRows = Array.isArray(data) ? data : (data.value || data.entries || []);
+
+    // The flow returns every row ever logged — keep only today's (ET)
+    const todayET = getTodayET();
+    allTodayRows = allRows.filter(r => (r['Submitted At (ET)'] || '').startsWith(todayET));
 
     loading.style.display = 'none';
-
-    if (!rows || !rows.length) {
-      entries.innerHTML = `
-        <div class="log-empty">
-          <div class="log-empty-icon">📭</div>
-          <div class="log-empty-title">No deliveries yet today</div>
-          <div class="log-empty-sub">Entries will appear here as drivers submit the form</div>
-        </div>`;
-      return;
-    }
-
-    const reversed = [...rows].reverse();
-    let html = `<div class="log-count">${rows.length} deliver${rows.length===1?'y':'ies'} today</div>`;
-    html += `<div class="log-table-wrap"><table class="log-table">
-      <thead><tr>
-        <th>Invoice #</th><th>Time</th><th>Company</th><th>Address</th>
-      </tr></thead><tbody>`;
-
-    reversed.forEach((row, i) => {
-      const submitted = row['Submitted At (ET)'] || '';
-      const timePart = submitted.includes(',') ? submitted.split(',').slice(1).join(',').trim().replace(' ET','') : submitted;
-      const job = row['Invoice #'] || '—';
-      const company = row['Company Name'] || '';
-      const address = row['Delivery Address (Geocoded)'] || '';
-      const customer = row['Customer Name'] || '';
-      const driver = row['Driver Name'] || '';
-      const status = row['Status'] || 'Delivered';
-      const photoUrl = row['SharePoint Link'] || '';
-      const sigUrl = row['Recipient Signature'] || '';
-      const notes = row['Notes / Comments'] || '';
-
-      html += `
-        <tr id="logRow${i}" onclick="toggleLogDetail(${i})">
-          <td>${job}</td>
-          <td class="log-td-time">${timePart}</td>
-          <td class="log-td-company">${company}</td>
-          <td class="log-td-address">${address}<span class="log-expand-icon">▾</span></td>
-        </tr>
-        <tr class="log-detail-row" id="logDetail${i}" style="display:none;">
-          <td colspan="4">
-            <div class="log-detail-box">
-              <div class="log-detail-line"><b>Customer:</b> ${customer || '—'}</div>
-              <div class="log-detail-line"><b>Driver:</b> ${driver} &nbsp;·&nbsp; <b>Status:</b> ✓ ${status}</div>
-              ${notes ? `<div class="log-detail-line"><b>Notes:</b> ${notes}</div>` : ''}
-              <div class="log-detail-links">
-                ${photoUrl ? `<a class="log-photo-link" href="${photoUrl}" target="_blank">📷 View Photo</a>` : ''}
-                ${sigUrl ? `<a class="log-photo-link" href="${sigUrl}" target="_blank">✍️ View Signature</a>` : ''}
-              </div>
-            </div>
-          </td>
-        </tr>`;
-    });
-
-    html += `</tbody></table></div>`;
-    html += `<button class="log-refresh-btn" onclick="fetchLog()">↻ Refresh</button>`;
-    entries.innerHTML = html;
+    buildDriverFilterOptions();
+    renderLogRows();
 
   } catch(e) {
     loading.innerHTML = '⚠️ Could not load entries — tap to retry';
