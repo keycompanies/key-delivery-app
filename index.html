@@ -235,14 +235,14 @@
   }
   .sig-placeholder {
     position: absolute;
-    top: 0; left: 0; right: 0; height: 240px;
+    top: 0; left: 0; right: 0; bottom: 0;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 6px;
     color: var(--border);
     pointer-events: none;
     transition: opacity 0.2s;
   }
-  .sig-wrap.has-sig .sig-placeholder { opacity: 0; }
+  .has-sig .sig-placeholder { opacity: 0; }
   .sig-placeholder-icon { font-size: 28px; opacity: 0.6; }
   .sig-placeholder-text {
     font-size: 13px; font-weight: 700; letter-spacing: 0.3px;
@@ -261,7 +261,8 @@
     border-top: 1px solid var(--border);
   }
   .sig-hint { font-size: 11px; color: var(--steel-light); letter-spacing: 0.3px; font-weight: 600; }
-  .sig-clear-btn {
+  .sig-footer-btns { display: flex; gap: 8px; flex-shrink: 0; }
+  .sig-clear-btn, .sig-expand-btn {
     display: flex; align-items: center; gap: 5px;
     background: #fff;
     border: 1.5px solid var(--border);
@@ -273,7 +274,46 @@
     font-family: inherit;
     transition: background 0.15s;
   }
-  .sig-clear-btn:active { background: var(--bg); }
+  .sig-clear-btn:active, .sig-expand-btn:active { background: var(--bg); }
+
+  /* ── Signature Fullscreen Landscape Mode ── */
+  .sig-fullscreen-overlay {
+    position: fixed; inset: 0; z-index: 500;
+    background: #fff;
+    display: none;
+    flex-direction: column;
+  }
+  .sig-fullscreen-overlay.open { display: flex; }
+  .sig-fullscreen-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px;
+    background: linear-gradient(160deg, var(--navy) 0%, var(--navy-mid) 100%);
+    flex-shrink: 0;
+  }
+  .sig-fullscreen-title { color: #fff; font-size: 14px; font-weight: 800; }
+  .sig-fullscreen-done-btn {
+    background: var(--orange); color: #fff; border: none;
+    border-radius: 20px; padding: 8px 18px;
+    font-size: 13px; font-weight: 800; cursor: pointer; font-family: inherit;
+  }
+  .sig-fullscreen-hint {
+    text-align: center; font-size: 12px; color: var(--steel-light); font-weight: 600;
+    padding: 8px 16px; flex-shrink: 0;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+  }
+  .sig-fullscreen-canvas-host {
+    flex: 1; position: relative; background: #fff; overflow: hidden; min-height: 0;
+  }
+  .sig-fullscreen-footer {
+    flex-shrink: 0; padding: 12px 16px;
+    background: var(--surface); border-top: 1px solid var(--border);
+    display: flex; justify-content: center;
+  }
+  @media (orientation: landscape) {
+    .sig-fullscreen-hint { display: none; }
+    .sig-fullscreen-header { padding: 8px 14px; }
+    .sig-fullscreen-footer { padding: 8px 14px; }
+  }
 
   /* ── Submit ── */
   .submit-btn {
@@ -508,6 +548,26 @@
   </div>
 </div>
 
+<!-- SIGNATURE FULLSCREEN LANDSCAPE OVERLAY -->
+<div class="sig-fullscreen-overlay" id="sigFullscreenOverlay">
+  <div class="sig-fullscreen-header">
+    <div class="sig-fullscreen-title">✍️ Recipient Signature</div>
+    <button class="sig-fullscreen-done-btn" onclick="collapseSig()">✓ Done</button>
+  </div>
+  <div class="sig-fullscreen-hint">Rotate your phone sideways for more room to sign</div>
+  <div class="sig-fullscreen-canvas-host" id="sigFullscreenHost">
+    <div class="sig-baseline" id="sigBaselineFull"></div>
+    <div class="sig-placeholder" id="sigPlaceholderFull">
+      <div class="sig-placeholder-icon">✕</div>
+      <div class="sig-placeholder-text">Sign Here</div>
+    </div>
+  </div>
+  <div class="sig-fullscreen-footer">
+    <button class="sig-clear-btn" onclick="clearSig()">🗑️ Clear Signature</button>
+  </div>
+</div>
+
+
 
 <div class="header">
   <div class="header-top">
@@ -628,14 +688,17 @@
         <label>Have the recipient sign below</label>
         <div class="sig-wrap" id="sigWrap">
           <canvas id="sigCanvas"></canvas>
-          <div class="sig-baseline"></div>
+          <div class="sig-baseline" id="sigBaselineInline"></div>
           <div class="sig-placeholder" id="sigPlaceholder">
             <div class="sig-placeholder-icon">✕</div>
             <div class="sig-placeholder-text">Sign Here</div>
           </div>
           <div class="sig-footer">
             <span class="sig-hint">Use your finger or a stylus</span>
-            <button class="sig-clear-btn" onclick="clearSig()">🗑️ Clear</button>
+            <div class="sig-footer-btns">
+              <button class="sig-expand-btn" onclick="expandSig()" title="Expand to full screen">⛶ Expand</button>
+              <button class="sig-clear-btn" onclick="clearSig()">🗑️ Clear</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1085,22 +1148,58 @@ const sigCanvas = document.getElementById('sigCanvas');
 const sigCtx = sigCanvas.getContext('2d');
 let isSigning = false;
 let sigHasContent = false;
+let sigMode = 'inline'; // 'inline' or 'fullscreen'
 
-function initSigCanvas() {
-  const rect = sigCanvas.parentElement.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  const displayHeight = 240;
-  // Render at device pixel ratio so signatures stay crisp on phone screens
-  sigCanvas.width = rect.width * dpr;
-  sigCanvas.height = displayHeight * dpr;
-  sigCanvas.style.width = rect.width + 'px';
-  sigCanvas.style.height = displayHeight + 'px';
-  sigCtx.setTransform(1, 0, 0, 1, 0, 0); // reset before scaling — avoids compounding on resize
-  sigCtx.scale(dpr, dpr);
-  sigCtx.strokeStyle = '#0D1F3C';
-  sigCtx.lineWidth = 3;
-  sigCtx.lineCap = 'round';
-  sigCtx.lineJoin = 'round';
+// Resizes the canvas to new CSS-pixel dimensions while preserving any
+// existing drawing (scaled/centered to fit) — used both for the initial
+// setup and whenever the canvas moves between inline/fullscreen or the
+// device rotates while signing.
+function resizeSigCanvas(cssWidth, cssHeight) {
+  return new Promise((resolve) => {
+    if (cssWidth <= 0 || cssHeight <= 0) return resolve();
+    const dpr = window.devicePixelRatio || 1;
+    let dataUrl = null;
+    if (sigHasContent) {
+      try { dataUrl = sigCanvas.toDataURL('image/png'); } catch (e) {}
+    }
+
+    sigCanvas.width = cssWidth * dpr;
+    sigCanvas.height = cssHeight * dpr;
+    sigCanvas.style.width = cssWidth + 'px';
+    sigCanvas.style.height = cssHeight + 'px';
+    sigCtx.setTransform(1, 0, 0, 1, 0, 0); // reset before scaling — avoids compounding
+    sigCtx.scale(dpr, dpr);
+    sigCtx.strokeStyle = '#0D1F3C';
+    sigCtx.lineWidth = 3;
+    sigCtx.lineCap = 'round';
+    sigCtx.lineJoin = 'round';
+
+    if (dataUrl) {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(cssWidth / img.width, cssHeight / img.height);
+        const drawW = img.width * scale, drawH = img.height * scale;
+        sigCtx.drawImage(img, (cssWidth - drawW) / 2, (cssHeight - drawH) / 2, drawW, drawH);
+        resolve();
+      };
+      img.onerror = () => resolve();
+      img.src = dataUrl;
+    } else {
+      resolve();
+    }
+  });
+}
+
+// Figures out the right container to measure based on current mode,
+// then resizes the canvas to fill it.
+function refreshSigCanvasSize() {
+  if (sigMode === 'fullscreen') {
+    const rect = document.getElementById('sigFullscreenHost').getBoundingClientRect();
+    resizeSigCanvas(rect.width, rect.height);
+  } else {
+    const rect = document.getElementById('sigWrap').getBoundingClientRect();
+    resizeSigCanvas(rect.width, 240);
+  }
 }
 
 function getSigPos(e) {
@@ -1140,12 +1239,14 @@ sigCanvas.addEventListener('touchend', () => { isSigning = false; });
 function markSig() {
   sigHasContent = true;
   document.getElementById('sigWrap').classList.add('has-sig');
+  document.getElementById('sigFullscreenHost').classList.add('has-sig');
 }
 
 function clearSig() {
   sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height);
   sigHasContent = false;
   document.getElementById('sigWrap').classList.remove('has-sig');
+  document.getElementById('sigFullscreenHost').classList.remove('has-sig');
 }
 
 function getSignatureBase64() {
@@ -1153,9 +1254,44 @@ function getSignatureBase64() {
   return sigCanvas.toDataURL('image/png').split(',')[1];
 }
 
-// Init after layout
-setTimeout(initSigCanvas, 200);
-window.addEventListener('resize', initSigCanvas);
+// ── Expand to fullscreen landscape signing ──
+async function expandSig() {
+  sigMode = 'fullscreen';
+  const overlay = document.getElementById('sigFullscreenOverlay');
+  const host = document.getElementById('sigFullscreenHost');
+  const baselineFull = document.getElementById('sigBaselineFull');
+
+  host.insertBefore(sigCanvas, baselineFull); // move the SAME canvas element — keeps its listeners
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  // Best-effort true fullscreen (hides browser chrome on Android Chrome;
+  // silently no-ops where unsupported, e.g. iOS Safari)
+  try { if (overlay.requestFullscreen) await overlay.requestFullscreen(); } catch (e) {}
+
+  requestAnimationFrame(refreshSigCanvasSize);
+}
+
+async function collapseSig() {
+  if (document.fullscreenElement) {
+    try { await document.exitFullscreen(); } catch (e) {}
+  }
+  sigMode = 'inline';
+  const wrap = document.getElementById('sigWrap');
+  const baselineInline = document.getElementById('sigBaselineInline');
+  wrap.insertBefore(sigCanvas, baselineInline); // move it back
+
+  document.getElementById('sigFullscreenOverlay').classList.remove('open');
+  document.body.style.overflow = '';
+
+  requestAnimationFrame(refreshSigCanvasSize);
+}
+
+// Re-fit the canvas whenever the viewport changes size — this is what
+// makes rotating the phone mid-signature actually reshape the canvas
+// into a wide landscape area instead of just clipping it.
+window.addEventListener('resize', refreshSigCanvasSize);
+setTimeout(refreshSigCanvasSize, 200);
 
 // ══════════════════════════════════════════════════
 // TOAST & SUBMIT
