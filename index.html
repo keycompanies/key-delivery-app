@@ -745,20 +745,20 @@ async function handlePackingSlip(event) {
 
   try {
     const resized = await resizeImageForOCR(file, 1800);
-    const result = await Tesseract.recognize(resized, 'eng');
-    const text = result.data.text;
-    const words = result.data.words || [];
+    const { text, words } = await autoOrientRecognize(resized);
 
-    // Primary method: use word positions to isolate the Ship To column
-    // only — this is what keeps Bill To (printed alongside it) out of
-    // the result even when both blocks contain similar-looking text.
+    // Try the label-form layout first ("Co. / Attn. / Add. / City / Zip /
+    // Order#") since it's an unambiguous, distinct format with no
+    // "Ship To" text to conflict with. Then fall back to Ship-To parsing.
     let parsed = null;
-    try { parsed = parseShipToColumn(words); } catch (e) { console.warn('Column parse failed:', e); }
+    try { parsed = parseLabelForm(words); } catch (e) { console.warn('Label-form parse failed:', e); }
 
-    // Fallback if position data isn't usable for some reason
+    if (!parsed) {
+      try { parsed = parseShipToColumn(words); } catch (e) { console.warn('Column parse failed:', e); }
+    }
     if (!parsed) parsed = parsePackingSlipFallback(text);
 
-    parsed.jobNumber = extractTicketNumber(text);
+    if (!parsed.jobNumber) parsed.jobNumber = extractTicketNumber(text, words);
 
     let foundCount = 0;
     if (parsed.company)   { flashFill('companyName', parsed.company); foundCount++; }
@@ -770,7 +770,7 @@ async function handlePackingSlip(event) {
       status.textContent = '✅ Autofilled ' + foundCount + ' field' + (foundCount===1?'':'s') + ' — please verify below before submitting';
       status.className = 'geo-status ok';
     } else {
-      status.textContent = '⚠️ Could not find a "Ship To" section — please fill in manually';
+      status.textContent = '⚠️ Could not find recipient info — please fill in manually';
       status.className = 'geo-status err';
     }
   } catch (err) {
@@ -801,20 +801,85 @@ function resizeImageForOCR(file, maxDim) {
   });
 }
 
-// ── Column-aware Ship To extraction ──
-// Groups recognized words into visual rows, but filters words down to
-// ONE column (left vs right of the page) BEFORE grouping — this is the
-// key step that keeps a side-by-side "Bill To" block from contaminating
-// the "Ship To" result, since merging rows first (then filtering) loses
-// the distinction once both columns' words share the same row object.
-function buildRows(words) {
+// ── Rotation-aware recognition ──
+// Phones held sideways when scanning a shipping label are common (a
+// packing slip taped to a box, photographed from whatever angle is
+// convenient) — real scans from this team confirmed it. Tesseract
+// silently returns near-garbage on a sideways image rather than failing
+// loudly, so these scans were quietly producing zero usable fields.
+//
+// This uses Tesseract's actual orientation-detection model (OSD) rather
+// than guessing rotation by re-running full recognition at every angle
+// and picking whichever looks most "confident" — that approach was
+// tested against real scans and found to occasionally flip an already-
+// correct photo into a wrong rotation on certain wide table layouts,
+// where a sideways misread happened to score higher confidence than the
+// correct, upright reading. OSD analyzes actual text-line/character
+// shape to judge orientation, which doesn't have that failure mode.
+//
+// Correction formula (rotate-to-fix = 360 - detected orientation) is
+// Tesseract's documented convention, e.g. detected orientation 90° →
+// rotate 270° to correct.
+//
+// Safety net: if OSD suggests a rotation, we still compare the rotated
+// result's confidence against the un-rotated baseline and keep whichever
+// is actually better — so a misdetection can't make things worse than
+// doing nothing.
+async function autoOrientRecognize(blob) {
+  let correction = 0;
+  try {
+    const osdWorker = await Tesseract.createWorker('eng', 1, { legacyCore: true, legacyLang: true });
+    const { data } = await osdWorker.detect(blob);
+    await osdWorker.terminate();
+    if (data && typeof data.orientation_degrees === 'number') {
+      correction = (360 - data.orientation_degrees) % 360;
+    }
+  } catch (e) {
+    console.warn('Orientation detection unavailable, proceeding unrotated:', e);
+  }
+
+  if (!correction) {
+    const result = await Tesseract.recognize(blob, 'eng');
+    return { text: result.data.text, words: result.data.words || [] };
+  }
+
+  const [baseline, rotated] = await Promise.all([
+    Tesseract.recognize(blob, 'eng'),
+    rotateImageBlob(blob, correction).then(rb => Tesseract.recognize(rb, 'eng')),
+  ]);
+
+  const best = rotated.data.confidence > baseline.data.confidence ? rotated : baseline;
+  return { text: best.data.text, words: best.data.words || [] };
+}
+
+function rotateImageBlob(blob, angle) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const rad = angle * Math.PI / 180;
+      const swap = angle === 90 || angle === 270;
+      canvas.width = swap ? img.height : img.width;
+      canvas.height = swap ? img.width : img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(rad);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      canvas.toBlob(b => { URL.revokeObjectURL(url); resolve(b); }, 'image/jpeg', 0.92);
+    };
+    img.src = url;
+  });
+}
+
+// ── Row grouping (shared by both document-format parsers below) ──
+// Groups recognized words into visual rows, keeping each row's word list
+// (not just merged text) so label-form parsing can locate exactly where
+// a label ends and its value begins on the same line.
+function buildRowsWithWords(words) {
   if (!words || !words.length) return [];
   const sorted = [...words].sort((a, b) => a.bbox.y0 - b.bbox.y0);
   const avgHeight = sorted.reduce((s, w) => s + (w.bbox.y1 - w.bbox.y0), 0) / sorted.length;
-  // Tighter than before (was 0.6x) — a looser threshold can merge two
-  // genuinely separate printed lines into one row on tightly-spaced or
-  // slightly skewed phone photos, which shifts every field down by one
-  // (customer name lands in the company field, etc).
   const threshold = avgHeight * 0.45;
 
   const rows = [];
@@ -829,6 +894,7 @@ function buildRows(words) {
   return rows.map(r => {
     const ws = [...r.words].sort((a, b) => a.bbox.x0 - b.bbox.x0);
     return {
+      words: ws,
       text: ws.map(w => w.text).join(' '),
       bbox: {
         x0: Math.min(...ws.map(w => w.bbox.x0)),
@@ -838,6 +904,82 @@ function buildRows(words) {
       }
     };
   }).sort((a, b) => a.bbox.y0 - b.bbox.y0);
+}
+function buildRows(words) {
+  return buildRowsWithWords(words).map(r => ({ text: r.text, bbox: r.bbox }));
+}
+
+// ── NEW: "Co. / Attn. / Add. / City / Zip / Ref. / Order#" label form ──
+// A distinct fill-in-the-blank shipping label (no "Ship To" text at all),
+// which the previous parser had zero support for — it always returned
+// empty fields on this format. Each field is its own labeled row, though
+// two labels sometimes share a row (e.g. "City ____  Zip ____").
+const LABEL_FORM_DEFS = [
+  { key: 'company',  re: /^co\.?:?$/i },
+  { key: 'customer', re: /^attn\.?:?$/i },
+  { key: 'address',  re: /^add\.?:?$/i },
+  { key: 'city',     re: /^city:?$/i },
+  { key: 'zip',      re: /^zip:?$/i },
+  { key: 'ref',      re: /^ref\.?:?$/i },
+  { key: 'ticket',   re: /^order\s*#?:?$/i },
+];
+
+// Require both "Co." and "Attn." before treating this as the label form,
+// so we don't false-positive on a packing slip that happens to contain
+// an isolated word like "city".
+function detectLabelForm(rows) {
+  let hasCo = false, hasAttn = false;
+  for (const row of rows) {
+    for (const w of row.words) {
+      if (/^co\.?:?$/i.test(w.text)) hasCo = true;
+      if (/^attn\.?:?$/i.test(w.text)) hasAttn = true;
+    }
+  }
+  return hasCo && hasAttn;
+}
+
+function parseLabelForm(words) {
+  const rows = buildRowsWithWords(words);
+  if (!detectLabelForm(rows)) return null; // caller falls back to Ship-To parsing
+
+  const fields = {};
+
+  for (const row of rows) {
+    // A row can hold more than one label (City/Zip share a line), so we
+    // find every label token first, then slice the row into per-label
+    // value spans using each label's x-position as a boundary.
+    const hits = [];
+    row.words.forEach((w, i) => {
+      for (const def of LABEL_FORM_DEFS) {
+        if (def.re.test(w.text)) { hits.push({ ...def, idx: i, x1: w.bbox.x1 }); break; }
+      }
+    });
+    if (!hits.length) continue;
+
+    hits.sort((a, b) => a.x1 - b.x1);
+    for (let h = 0; h < hits.length; h++) {
+      const startX = hits[h].x1;
+      const endX = h + 1 < hits.length ? row.words[hits[h + 1].idx].bbox.x0 : Infinity;
+      const valueWords = row.words
+        .filter((w, wi) => w.bbox.x0 >= startX && w.bbox.x0 < endX && !hits.some(h2 => h2.idx === wi))
+        // Strip stray leading/trailing OCR punctuation noise from each
+        // token (a misread quote, bracket, or dash sitting right against
+        // real text — e.g. "'Josh" or "[Midsole" — not just tokens that
+        // are punctuation-only).
+        .map(w => w.text.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, ''))
+        .filter(Boolean);
+      const value = valueWords.join(' ').trim();
+      if (value) fields[hits[h].key] = value;
+    }
+  }
+
+  const addressParts = [fields.address, fields.city, fields.zip].filter(Boolean);
+  return {
+    customer: fields.customer || '',
+    company: fields.company || '',
+    address: addressParts.join(', '),
+    jobNumber: fields.ticket || '',
+  };
 }
 
 // Finds a "<Label> To" pair, whether OCR'd as one token ("ShipTo:") or two ("Ship" "To:")
@@ -856,6 +998,14 @@ function findLabelPos(words, label) {
   }
   return null;
 }
+
+// Widened stop-list: added Phone Number / Ship Via / Operator, "of
+// Cartons" without a leading "#" (OCR frequently drops the # glyph), and
+// any "<Label> Number/No./#" row (Invoice/Order/Quote/PO/Packing Slip) —
+// these often sit in the same visual column as Ship To and were
+// previously getting absorbed straight into the address text even
+// though the ticket number is extracted separately anyway.
+const STOP_RE = /^(#?\s*of\s*cartons|promised|project\s*:|sales\s*rep|item\s*code|ordered\s*by|terms\s*:|phone\s*number|mobile\s*number|ship\s*via|operator\s*:|(invoice|order|quote|po|packing\s*slip)\s*(number|no\.?|#))/i;
 
 function parseShipToColumn(words) {
   const shipPos = findLabelPos(words, 'ship');
@@ -878,14 +1028,13 @@ function parseShipToColumn(words) {
   if (!rows.length) return null;
   const shipRow = rows.find(r => r.bbox.y0 <= shipPos.y1 + 5 && r.bbox.y0 >= shipPos.y0 - 5) || rows[0];
 
-  const stopRe = /^(#\s*of cartons|promised|project\s*:|sales rep|item code|ordered by|terms\s*:)/i;
   const blockLines = [];
   const lineHeight = Math.max(1, shipRow.bbox.y1 - shipRow.bbox.y0);
   let lastY = shipRow.bbox.y1;
 
   for (const row of rows) {
     if (row.bbox.y0 <= shipPos.y0) continue; // the label's own row is handled separately below
-    if (stopRe.test(row.text)) break;
+    if (STOP_RE.test(row.text)) break;
     if (row.bbox.y0 - lastY > lineHeight * 2.2) break; // big vertical gap = end of block
     blockLines.push(row.text.trim());
     lastY = row.bbox.y1;
@@ -902,21 +1051,93 @@ function parseShipToColumn(words) {
   return assembleFields(blockLines);
 }
 
+// ── Content-based field classification ──
+// Previously this assigned fields by pure line position (line 1 =
+// customer, line 2 = company, rest = address). That's fragile: a single
+// stray OCR row (a misread border, a barcode fragment, a blank line that
+// OCR still produced a row for) shifts every field below it by one —
+// the customer name lands in the company field, the company lands in
+// the address, etc. That shift was confirmed reproducible with just one
+// extra junk row.
+//
+// Instead, each line is classified by what it actually looks like:
+//   - an address line has a street number (+ optional unit/suite), or a
+//     city/state/zip tail
+//   - a person's name is 2-3 simple word-like tokens with no digits and
+//     no business wording
+//   - a company name contains recognizable business wording (Inc, LLC,
+//     Marketing, Homes, etc.) or a "/" or "&" (e.g. "Verdantas/Newark")
+// Lines that don't look like real content (a lone stray character, a
+// misread symbol) are dropped before assignment so they can't shift
+// anything. Position is only used as a last-resort tiebreaker when
+// nothing classifies clearly — preserving the old behavior for genuinely
+// ambiguous input rather than guessing wrong in a new way.
+function isJunkLine(line) {
+  return !/[A-Za-z0-9]{2,}/.test(line);
+}
+
+const ADDRESS_STREET_RE = /^\d+\s+\S/;                          // "1555 W Main St", "9050 Centre Point Drive"
+const ADDRESS_UNIT_RE = /^(ste|suite|unit|apt|bldg|fl(oor)?)\.?\s*#?\s*\S+/i; // "STE 210"
+const ADDRESS_CITYZIP_RE = /[A-Za-z].*\d{5}(-\d{4})?\s*$/;       // "Newark OH 43055", "Columbus, Ohio 43215"
+function isAddressLine(line) {
+  return ADDRESS_STREET_RE.test(line) || ADDRESS_UNIT_RE.test(line) || ADDRESS_CITYZIP_RE.test(line);
+}
+
+const COMPANY_KEYWORDS_RE = /\b(inc|llc|ltd|corp(oration)?|co|company|group|industries|enterprises|solutions|services|marketing|supply|systems|holdings|manufacturing|construction|builders|homes|partners|associates|technologies|products|distributors|logistics|trucking|electric|plumbing|roofing|bros|brothers|studios?|labs?|laboratories|designs?|realty|properties|management|consulting)\b/i;
+function isCompanyName(line) {
+  return COMPANY_KEYWORDS_RE.test(line) || /[&/]/.test(line);
+}
+
+function isPersonName(line) {
+  const tokens = line.trim().split(/\s+/);
+  if (tokens.length < 2 || tokens.length > 3) return false;
+  if (isCompanyName(line) || isAddressLine(line)) return false;
+  return tokens.every(t => /^[A-Za-z][A-Za-z'\-]*\.?$/.test(t));
+}
+
 // Decides customer/company/address from the collected Ship To lines.
-// An explicit "Attn:" line, if present, always wins for customer name.
+// An explicit "Attn:" line, if present, always wins for customer name
+// (unambiguous — no need for content classification).
 function assembleFields(blockLines) {
   let customer = '', company = '', address = '';
   const attnIdx = blockLines.findIndex(l => /\battn\.?:?\s*\S/i.test(l));
   if (attnIdx !== -1) {
     customer = blockLines[attnIdx].replace(/.*?attn\.?:?/i, '').trim();
-    const remaining = blockLines.filter((_, i) => i !== attnIdx);
+    const remaining = blockLines.filter((_, i) => i !== attnIdx).filter(l => !isJunkLine(l));
     company = remaining[0] || '';
     address = remaining.slice(1).join(', ');
-  } else {
-    customer = blockLines[0] || '';
-    company  = blockLines[1] || '';
-    address  = blockLines.slice(2).join(', ');
+    return { customer, company, address };
   }
+
+  const lines = blockLines.filter(l => !isJunkLine(l));
+  if (!lines.length) return { customer: '', company: '', address: '' };
+
+  const addrStart = lines.findIndex(isAddressLine);
+  const headerLines = addrStart === -1 ? lines.slice(0, 2) : lines.slice(0, addrStart);
+  const addressLines = addrStart === -1 ? lines.slice(2) : lines.slice(addrStart);
+
+  const personIdx = headerLines.findIndex(isPersonName);
+  const companyIdx = headerLines.findIndex(isCompanyName);
+
+  if (personIdx !== -1) {
+    // A confident person-name anchor found — everything else in the
+    // header block is company, joined (handles a company name that
+    // wraps across two OCR lines where only one line contains a
+    // recognizable keyword, e.g. "Great Lakes" / "Logistics Group").
+    customer = headerLines[personIdx];
+    company = headerLines.filter((_, i) => i !== personIdx).join(', ');
+  } else if (companyIdx !== -1) {
+    company = headerLines[companyIdx];
+    customer = headerLines.filter((_, i) => i !== companyIdx).join(', ');
+  } else {
+    // Nothing classified confidently — fall back to the documented
+    // default order rather than guessing further.
+    customer = headerLines[0] || '';
+    company = headerLines[1] || '';
+    if (headerLines.length > 2) address = headerLines.slice(2).join(', ');
+  }
+
+  address = [address, addressLines.join(', ')].filter(Boolean).join(', ');
   return { customer, company, address };
 }
 
@@ -934,7 +1155,7 @@ function parsePackingSlipFallback(text) {
   if (firstLine) collected.push(firstLine);
   for (let j = idx + 1; j < lines.length && collected.length < 5; j++) {
     const l = lines[j];
-    if (/^(bill to|ship to|#\s*of cartons|promised|project\s*:|sales rep|item code|ordered by)/i.test(l)) break;
+    if (/^(bill to|ship to)/i.test(l) || STOP_RE.test(l)) break;
     collected.push(l);
   }
   return assembleFields(collected);
@@ -942,8 +1163,27 @@ function parsePackingSlipFallback(text) {
 
 // Ticket number: same field, relabeled by document stage.
 // Priority: Invoice > Order > Quote > Packing Slip > PO (customer's own ref, lowest priority)
-function extractTicketNumber(text) {
+//
+// Uses OUR OWN row-grouping (by actual word y-position) rather than
+// Tesseract's default line-broken text. On some packing slips the label
+// ("Invoice Number") and its value ("199913") sit at the same visual
+// height with a wide gap between them (e.g. a ruled two-column table) —
+// Tesseract's own text linearization was found to split these onto
+// separate lines even though their pixel y-coordinates line up, which
+// made the plain regex below fail to find a value it was sitting right
+// next to. Re-flowing by our own y-clustering fixes that; we still fall
+// back to Tesseract's raw text in case row-grouping isn't available.
+function extractTicketNumber(text, words) {
+  let reflowed = text;
+  if (words && words.length) {
+    try { reflowed = buildRowsWithWords(words).map(r => r.text).join('\n'); } catch (e) { /* ignore */ }
+  }
   return (
+    findLabeledNumber(reflowed, 'Invoice') ||
+    findLabeledNumber(reflowed, 'Order') ||
+    findLabeledNumber(reflowed, 'Quote') ||
+    findLabeledNumber(reflowed, 'Packing\\s*Slip') ||
+    findLabeledNumber(reflowed, 'PO') ||
     findLabeledNumber(text, 'Invoice') ||
     findLabeledNumber(text, 'Order') ||
     findLabeledNumber(text, 'Quote') ||
@@ -956,13 +1196,18 @@ function findLabeledNumber(text, label) {
   // Number/No./# suffix is required (not optional) — otherwise "Quote"
   // matches the bare document title word ("QUOTE") instead of the
   // actual "Quote Number" field further down the page.
-  // [^\d\n] (not digit, not newline) keeps the match from crossing into
-  // the next line when a field is printed blank (e.g. an empty PO Number)
-  const re = new RegExp(label + '\\s*(Number|No\\.?|#)[^\\d\\n]{0,8}([A-Za-z0-9\\-]{3,})', 'i');
+  // The gap between label and value may only be punctuation/spaces —
+  // never a word character — so an alpha prefix on the value itself
+  // (e.g. "INV-9981") isn't mistakenly swallowed by the gap the way a
+  // [^\d\n] gap would. Still can't cross a newline, so a genuinely blank
+  // field correctly fails to match rather than grabbing the next field's
+  // number.
+  const re = new RegExp(label + '\\s*(?:Number|No\\.?|#)[^\\w\\n]{0,4}([A-Za-z0-9][A-Za-z0-9\\-]{2,})', 'i');
   const m = text.match(re);
-  if (m && m[2] && /\d/.test(m[2])) return m[2];
+  if (m && m[1] && /\d/.test(m[1])) return m[1];
   return '';
 }
+
 
 function flashFill(id, value) {
   const el = document.getElementById(id);
