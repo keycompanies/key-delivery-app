@@ -212,6 +212,17 @@
   .photo-label { font-size: 13px; color: var(--muted); font-weight: 600; }
   .photo-sub { font-size: 10px; color: var(--border); margin-top: 3px; letter-spacing: 0.2px; }
   .photo-preview { max-width: 100%; border-radius: var(--radius-sm); margin-top: 12px; display: none; }
+  .photo-btn-row { display: flex; gap: 10px; margin-top: 10px; }
+  .photo-btn {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: var(--navy); color: #fff; font-family: inherit;
+    border: none; border-radius: var(--radius-sm);
+    padding: 13px 10px; font-size: 13px; font-weight: 700;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .photo-btn:active { background: var(--navy-light); }
+  .photo-btn.secondary { background: #fff; color: var(--navy); border: 1.5px solid var(--border); }
+  .photo-btn.secondary:active { background: var(--surface); }
 
   /* ── Signature Pad ── */
   .sig-wrap {
@@ -672,10 +683,15 @@
       <div class="section-label">📷 Proof of Delivery Photo</div>
       <div class="field">
         <div class="photo-zone" id="photoZone">
-          <input type="file" id="photoInput" accept="image/*" capture="environment" onchange="handlePhoto(event)"/>
           <div class="photo-icon">📸</div>
-          <div class="photo-label">Tap to take or upload photo</div>
+          <div class="photo-label">Add a proof of delivery photo</div>
           <div class="photo-sub">Saved as: INVOICE# · DATE · COMPANY NAME</div>
+          <div class="photo-btn-row">
+            <button type="button" class="photo-btn" onclick="document.getElementById('photoInputCamera').click()">📷 Take Photo</button>
+            <button type="button" class="photo-btn secondary" onclick="document.getElementById('photoInputLibrary').click()">🖼️ Camera Roll</button>
+          </div>
+          <input type="file" id="photoInputCamera" accept="image/*" capture="environment" onchange="handlePhoto(event)" hidden/>
+          <input type="file" id="photoInputLibrary" accept="image/*" onchange="handlePhoto(event)" hidden/>
           <img class="photo-preview" id="photoPreview" alt="Delivery photo preview"/>
         </div>
       </div>
@@ -1640,7 +1656,8 @@ function resetForm() {
   document.getElementById('photoZone').classList.remove('has-photo');
   document.getElementById('photoPreview').style.display = 'none';
   document.getElementById('photoPreview').src = '';
-  document.getElementById('photoInput').value = '';
+  document.getElementById('photoInputCamera').value = '';
+  document.getElementById('photoInputLibrary').value = '';
   document.getElementById('dateTime').value = getEasternDateTime();
     photoFile = null; photoBase64 = null;
   geoData = { address:'', lat:'', lng:'' };
