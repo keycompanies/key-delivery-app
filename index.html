@@ -625,10 +625,15 @@
       <div class="section-label">📄 Scan Packing Slip <span style="text-transform:none;font-weight:600;color:var(--steel-light);">&nbsp;(optional)</span></div>
       <div class="field" style="margin-bottom:0">
         <div class="photo-zone" id="slipZone">
-          <input type="file" id="slipInput" accept="image/*" capture="environment" onchange="handlePackingSlip(event)"/>
           <div class="photo-icon">📄</div>
-          <div class="photo-label">Tap to scan a packing slip or invoice</div>
+          <div class="photo-label">Scan a packing slip or invoice</div>
           <div class="photo-sub">Auto-fills company, customer, address &amp; ticket #</div>
+          <div class="photo-btn-row">
+            <button type="button" class="photo-btn" onclick="document.getElementById('slipInputCamera').click()">📷 Take Photo</button>
+            <button type="button" class="photo-btn secondary" onclick="document.getElementById('slipInputLibrary').click()">🖼️ Camera Roll</button>
+          </div>
+          <input type="file" id="slipInputCamera" accept="image/*" capture="environment" onchange="handlePackingSlip(event)" hidden/>
+          <input type="file" id="slipInputLibrary" accept="image/*" onchange="handlePackingSlip(event)" hidden/>
           <img class="photo-preview" id="slipPreview" alt="Packing slip preview"/>
         </div>
         <div class="geo-status" id="slipStatus" style="margin-top:8px;"></div>
@@ -1667,7 +1672,8 @@ function resetForm() {
   document.getElementById('slipZone').classList.remove('has-photo');
   document.getElementById('slipPreview').style.display = 'none';
   document.getElementById('slipPreview').src = '';
-  document.getElementById('slipInput').value = '';
+  document.getElementById('slipInputCamera').value = '';
+  document.getElementById('slipInputLibrary').value = '';
   document.getElementById('slipStatus').textContent = '';
   slipFile = null;
 
