@@ -401,7 +401,7 @@
     padding: 8px 16px; font-size: 13px; font-weight: 700;
     cursor: pointer; font-family: inherit;
   }
-  .log-body { flex: 1; overflow-y: auto; padding: 16px; max-width: 480px; margin: 0 auto; width: 100%; }
+  .log-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px; max-width: 1000px; margin: 0 auto; width: 100%; }
   .log-filter-bar {
     position: sticky; top: -16px; z-index: 5;
     margin: -16px -16px 14px;
@@ -441,58 +441,141 @@
   }
 
   /* ── Log Table ── */
+  /* The wrap clips the rounded corners; the inner .log-table-scroll is what
+     actually scrolls sideways, so on a phone the whole table swipes left/right
+     while the Invoice # column stays pinned on the left. */
   .log-table-wrap {
+    position: relative;
     background: var(--card); border: 1px solid var(--border);
     border-radius: var(--radius); overflow: hidden;
     box-shadow: 0 1px 4px rgba(13,31,60,0.06);
   }
-  table.log-table { width: 100%; border-collapse: collapse; }
+  .log-table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+  .log-table-wrap::after {               /* right-edge shadow = "more columns this way" */
+    content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: 26px;
+    background: linear-gradient(to right, rgba(13,31,60,0), rgba(13,31,60,0.14));
+    pointer-events: none; opacity: 0; transition: opacity 0.2s;
+  }
+  .log-table-wrap.can-scroll-right::after { opacity: 1; }
+  .log-scroll-hint {
+    display: none; font-size: 11px; font-weight: 700; color: var(--steel-light);
+    margin: -4px 0 8px; letter-spacing: 0.2px;
+  }
+  .log-scroll-hint.show { display: block; }
+
+  table.log-table { width: 100%; min-width: 820px; border-collapse: separate; border-spacing: 0; }
   .log-table thead th {
-    position: sticky; top: 0; z-index: 2;
     background: var(--navy); color: rgba(255,255,255,0.85);
     font-size: 10px; font-weight: 800; letter-spacing: 0.5px;
-    text-transform: uppercase; text-align: left;
-    padding: 9px 8px;
+    text-transform: uppercase; text-align: left; white-space: nowrap;
+    padding: 9px 10px;
   }
-  .log-table thead th:first-child { padding-left: 12px; }
-  .log-table tbody tr {
-    border-bottom: 1px solid var(--border);
-    transition: background 0.15s;
-  }
-  .log-table tbody tr:last-child { border-bottom: none; }
-  .log-table tbody tr:active { background: var(--orange-bg); }
-  .log-table tbody tr.expanded { background: var(--surface); }
   .log-table td {
-    padding: 10px 8px; font-size: 12.5px; color: var(--text);
+    padding: 10px 10px; font-size: 12.5px; color: var(--text);
     vertical-align: top; line-height: 1.35;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
   }
-  .log-table td:first-child { padding-left: 12px; font-weight: 700; color: var(--navy-mid); white-space: nowrap; }
-  .log-td-time { white-space: nowrap; color: var(--muted); font-size: 11.5px; }
-  .log-td-company { font-weight: 700; color: var(--navy); }
-  .log-td-address { color: var(--steel); }
-  .log-expand-icon { color: var(--steel-light); font-size: 10px; float: right; }
+  .log-table tbody tr:last-child td { border-bottom: none; }
+  .log-table tbody tr.expanded td,
+  .log-table tbody tr.log-detail-row td { background: var(--surface); }
+  .log-table tbody tr.log-main-row:active td { background: var(--orange-bg); }
 
-  .log-detail-row td {
-    padding: 0 12px 14px;
-    background: var(--surface);
+  /* Pinned first column (Invoice #) */
+  .log-table th:first-child,
+  .log-table td:first-child {
+    position: sticky; left: 0; z-index: 1;
+    padding-left: 12px;
+    box-shadow: inset -1px 0 0 var(--border);
   }
+  .log-table th:first-child { z-index: 2; box-shadow: inset -1px 0 0 rgba(255,255,255,0.15); }
+  .log-table td:first-child { font-weight: 700; color: var(--navy-mid); white-space: nowrap; }
+  .log-table tr.log-detail-row td:first-child { position: static; box-shadow: none; }
+
+  .log-td-time     { white-space: nowrap; color: var(--muted); font-size: 11.5px; }
+  .log-td-company  { font-weight: 700; color: var(--navy); min-width: 130px; }
+  .log-td-customer { min-width: 110px; }
+  .log-td-address  { color: var(--steel); min-width: 200px; max-width: 280px; }
+  .log-td-driver   { white-space: nowrap; color: var(--steel); }
+  .log-td-media    { white-space: nowrap; }
+  .log-td-none     { color: var(--border); font-weight: 700; }
+  .log-expand-icon { color: var(--steel-light); font-size: 10px; margin-left: 6px; }
+
+  .log-view-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--orange-bg); color: var(--orange);
+    border: 1.5px solid rgba(224,122,47,0.35);
+    border-radius: 14px; padding: 5px 10px;
+    font-size: 11.5px; font-weight: 800; font-family: inherit;
+    cursor: pointer; white-space: nowrap;
+  }
+  .log-view-btn:active { background: var(--orange); color: #fff; }
+
+  .log-detail-row td { padding: 0 12px 14px; }
   .log-detail-box {
+    /* Stays in view while the table is scrolled sideways on a phone */
+    position: sticky; left: 12px;
+    max-width: calc(100vw - 58px);
     border-top: 1px dashed var(--border);
     padding-top: 10px; font-size: 12px; color: var(--steel);
+    white-space: normal;
   }
   .log-detail-line { margin-bottom: 5px; }
   .log-detail-line b { color: var(--navy); }
-  .log-detail-links { display: flex; gap: 14px; margin-top: 6px; }
-  .log-photo-link {
-    display: inline-flex; align-items: center; gap: 3px;
-    color: var(--orange); font-size: 12px; font-weight: 700; text-decoration: none;
-  }
+  .log-detail-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+  .log-detail-links .log-view-btn { padding: 8px 14px; font-size: 12.5px; }
   .log-refresh-btn {
     display: flex; align-items: center; justify-content: center; gap: 6px;
     width: 100%; background: none; border: 1.5px solid var(--border);
     border-radius: var(--radius); padding: 12px; font-size: 13px; font-weight: 700;
     color: var(--muted); cursor: pointer; font-family: inherit; margin-top: 10px;
   }
+
+  /* ── In-app Photo / Signature Viewer ── */
+  .viewer-overlay {
+    position: fixed; inset: 0; z-index: 600;
+    background: rgba(8,18,36,0.94);
+    display: none; flex-direction: column;
+  }
+  .viewer-overlay.open { display: flex; }
+  .viewer-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: calc(env(safe-area-inset-top, 0px) + 14px) 16px 12px;
+    flex-shrink: 0;
+  }
+  .viewer-title { color: #fff; font-size: 15px; font-weight: 800; }
+  .viewer-sub { color: rgba(255,255,255,0.6); font-size: 12px; margin-top: 2px; }
+  .viewer-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .viewer-btn {
+    background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.22);
+    color: #fff; border-radius: 20px; padding: 8px 14px;
+    font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit;
+    white-space: nowrap;
+  }
+  .viewer-btn.primary { background: var(--orange); border-color: var(--orange); }
+  .viewer-stage {
+    flex: 1; min-height: 0; overflow: auto;
+    display: flex; align-items: center; justify-content: center;
+    padding: 8px 12px calc(env(safe-area-inset-bottom, 0px) + 16px);
+    touch-action: pinch-zoom pan-x pan-y;
+  }
+  .viewer-stage img {
+    display: none; max-width: 100%; max-height: 100%;
+    object-fit: contain; border-radius: var(--radius-sm);
+  }
+  .viewer-stage.is-sig img {             /* signatures are transparent PNGs */
+    background: #fff; padding: 16px;
+    width: 100%; max-width: 760px; height: auto;
+  }
+  .viewer-status {
+    color: rgba(255,255,255,0.8); font-size: 14px; font-weight: 600;
+    text-align: center; line-height: 1.6; max-width: 320px;
+  }
+  .viewer-status a { color: var(--orange-light); }
 
   /* ── Packing Slip Scanner ── */
   input[type=text], input[type=email], textarea {
@@ -729,6 +812,24 @@
       <span id="submitLabel">Submit Delivery Log</span> <span>→</span>
     </button>
 
+  </div>
+</div>
+
+<!-- IN-APP PHOTO / SIGNATURE VIEWER -->
+<div class="viewer-overlay" id="viewerOverlay">
+  <div class="viewer-header">
+    <div>
+      <div class="viewer-title" id="viewerTitle"></div>
+      <div class="viewer-sub" id="viewerSub"></div>
+    </div>
+    <div class="viewer-actions">
+      <button class="viewer-btn primary" id="viewerShareBtn" onclick="shareViewerImage()" style="display:none">⬆︎ Save / Share</button>
+      <button class="viewer-btn" onclick="closeViewer()">✕ Close</button>
+    </div>
+  </div>
+  <div class="viewer-stage" id="viewerStage" onclick="if(event.target===this)closeViewer()">
+    <div class="viewer-status" id="viewerStatus"></div>
+    <img id="viewerImg" alt=""/>
   </div>
 </div>
 
@@ -1744,6 +1845,19 @@ function applyDriverFilter() {
   renderLogRows();
 }
 
+// ══════════════════════════════════════════════════
+// TODAY'S LOG — TABLE RENDERING
+// ══════════════════════════════════════════════════
+// Rows currently on screen (newest first) — the View buttons look up
+// their photo/signature link by index into this array.
+let renderedLogRows = [];
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function renderLogRows() {
   const entries = document.getElementById('logEntries');
   const loggedInDriver = sessionStorage.getItem('kc_driver') || '';
@@ -1759,60 +1873,245 @@ function renderLogRows() {
   }
 
   if (!rows.length) {
+    renderedLogRows = [];
     entries.innerHTML = `
       <div class="log-empty">
         <div class="log-empty-icon">📭</div>
-        <div class="log-empty-title">No deliveries ${filterLabel}</div>
+        <div class="log-empty-title">No deliveries ${escapeHtml(filterLabel)}</div>
         <div class="log-empty-sub">Entries will appear here as drivers submit the form</div>
-      </div>`;
+      </div>
+      <button class="log-refresh-btn" onclick="fetchLog()">↻ Refresh</button>`;
     return;
   }
 
-  const reversed = [...rows].reverse();
-  let html = `<div class="log-count">${rows.length} deliver${rows.length===1?'y':'ies'} ${filterLabel}</div>`;
-  html += `<div class="log-table-wrap"><table class="log-table">
+  renderedLogRows = [...rows].reverse();
+  let html = `<div class="log-count">${rows.length} deliver${rows.length===1?'y':'ies'} ${escapeHtml(filterLabel)}</div>`;
+  html += `<div class="log-scroll-hint" id="logScrollHint">Swipe the table sideways to see more →</div>`;
+  html += `<div class="log-table-wrap" id="logTableWrap"><div class="log-table-scroll" id="logTableScroll"><table class="log-table">
     <thead><tr>
-      <th>Invoice #</th><th>Time</th><th>Company</th><th>Address</th>
+      <th>Invoice #</th><th>Time</th><th>Company</th><th>Customer</th><th>Address</th><th>Driver</th><th>Photo</th><th>Signature</th>
     </tr></thead><tbody>`;
 
-  reversed.forEach((row, i) => {
+  renderedLogRows.forEach((row, i) => {
     const submitted = row['Submitted At (ET)'] || '';
     const timePart = submitted.includes(',') ? submitted.split(',').slice(1).join(',').trim().replace(' ET','') : submitted;
-    const job = row['Invoice #'] || '—';
-    const company = row['Company Name'] || '';
-    const address = row['Delivery Address (Geocoded)'] || '';
+    const job      = row['Invoice #'] || '—';
+    const company  = row['Company Name'] || '';
+    const address  = row['Delivery Address (Geocoded)'] || '';
     const customer = row['Customer Name'] || '';
-    const driver = row['Driver Name'] || '';
-    const status = row['Status'] || 'Delivered';
-    const photoUrl = row['SharePoint Link'] || '';
-    const sigUrl = row['Recipient Signature'] || '';
-    const notes = row['Notes / Comments'] || '';
+    const driver   = row['Driver Name'] || '';
+    const status   = row['Status'] || 'Delivered';
+    const notes    = row['Notes / Comments'] || '';
+    const hasPhoto = !!(row['SharePoint Link'] || '').trim();
+    const hasSig   = !!(row['Recipient Signature'] || '').trim();
+
+    const photoBtn = hasPhoto
+      ? `<button class="log-view-btn" onclick="event.stopPropagation();openViewer('photo',${i})">📷 View</button>`
+      : `<span class="log-td-none">—</span>`;
+    const sigBtn = hasSig
+      ? `<button class="log-view-btn" onclick="event.stopPropagation();openViewer('sig',${i})">✍️ View</button>`
+      : `<span class="log-td-none">—</span>`;
 
     html += `
-      <tr id="logRow${i}" onclick="toggleLogDetail(${i})">
-        <td>${job}</td>
-        <td class="log-td-time">${timePart}</td>
-        <td class="log-td-company">${company}</td>
-        <td class="log-td-address">${address}<span class="log-expand-icon">▾</span></td>
+      <tr class="log-main-row" id="logRow${i}" onclick="toggleLogDetail(${i})">
+        <td>${escapeHtml(job)}<span class="log-expand-icon">▾</span></td>
+        <td class="log-td-time">${escapeHtml(timePart)}</td>
+        <td class="log-td-company">${escapeHtml(company)}</td>
+        <td class="log-td-customer">${escapeHtml(customer || '—')}</td>
+        <td class="log-td-address">${escapeHtml(address)}</td>
+        <td class="log-td-driver">${escapeHtml(driver)}</td>
+        <td class="log-td-media">${photoBtn}</td>
+        <td class="log-td-media">${sigBtn}</td>
       </tr>
       <tr class="log-detail-row" id="logDetail${i}" style="display:none;">
-        <td colspan="4">
+        <td colspan="8">
           <div class="log-detail-box">
-            <div class="log-detail-line"><b>Customer:</b> ${customer || '—'}</div>
-            <div class="log-detail-line"><b>Driver:</b> ${driver} &nbsp;·&nbsp; <b>Status:</b> ✓ ${status}</div>
-            ${notes ? `<div class="log-detail-line"><b>Notes:</b> ${notes}</div>` : ''}
-            <div class="log-detail-links">
-              ${photoUrl ? `<a class="log-photo-link" href="${photoUrl}" target="_blank">📷 View Photo</a>` : ''}
-              ${sigUrl ? `<a class="log-photo-link" href="${sigUrl}" target="_blank">✍️ View Signature</a>` : ''}
-            </div>
+            <div class="log-detail-line"><b>${escapeHtml(company)}</b>${customer ? ' · c/o ' + escapeHtml(customer) : ''}</div>
+            <div class="log-detail-line">${escapeHtml(address)}</div>
+            <div class="log-detail-line"><b>Driver:</b> ${escapeHtml(driver)} &nbsp;·&nbsp; <b>Status:</b> ✓ ${escapeHtml(status)}</div>
+            ${notes ? `<div class="log-detail-line"><b>Notes:</b> ${escapeHtml(notes)}</div>` : ''}
+            ${(hasPhoto || hasSig) ? `<div class="log-detail-links">
+              ${hasPhoto ? `<button class="log-view-btn" onclick="event.stopPropagation();openViewer('photo',${i})">📷 View Photo</button>` : ''}
+              ${hasSig ? `<button class="log-view-btn" onclick="event.stopPropagation();openViewer('sig',${i})">✍️ View Signature</button>` : ''}
+            </div>` : ''}
           </div>
         </td>
       </tr>`;
   });
 
-  html += `</tbody></table></div>`;
+  html += `</tbody></table></div></div>`;
   html += `<button class="log-refresh-btn" onclick="fetchLog()">↻ Refresh</button>`;
   entries.innerHTML = html;
+
+  const scroller = document.getElementById('logTableScroll');
+  scroller.addEventListener('scroll', updateLogScrollHint, { passive: true });
+  updateLogScrollHint();
+}
+
+// Shows the "swipe →" hint + right-edge shadow only when there are
+// columns off-screen (i.e. on a phone), hides them once scrolled to the end.
+function updateLogScrollHint() {
+  const scroller = document.getElementById('logTableScroll');
+  const wrap = document.getElementById('logTableWrap');
+  const hint = document.getElementById('logScrollHint');
+  if (!scroller || !wrap) return;
+  const overflows = scroller.scrollWidth > scroller.clientWidth + 4;
+  const moreRight = scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 4;
+  wrap.classList.toggle('can-scroll-right', overflows && moreRight);
+  if (hint) hint.classList.toggle('show', overflows && scroller.scrollLeft < 8);
+}
+window.addEventListener('resize', updateLogScrollHint);
+
+// ══════════════════════════════════════════════════
+// IN-APP PHOTO / SIGNATURE VIEWER
+// Loads the image through a Power Automate flow (Flow 4 — "Get Delivery
+// Image") that runs under the flow owner's Microsoft connection, so
+// drivers never hit a Microsoft 365 sign-in page.
+// ══════════════════════════════════════════════════
+// Paste the HTTP trigger URL of Flow 4 here. While blank, the View buttons
+// fall back to opening the SharePoint link (the old sign-in behavior).
+const GET_FILE_URL = '';
+
+const SP_SITE_PATH = new URL(SHAREPOINT_SITE).pathname.replace(/\/$/, ''); // "/sites/Delivery"
+const viewerCache = new Map();   // link -> Blob, so re-opening is instant
+let viewerObjectUrl = null;
+let viewerFile = null;
+let viewerRequestId = 0;
+
+// Turns whatever SharePoint link the list stores into a path relative to
+// the Delivery site, e.g. "/Shared Documents/Delivery Log/Photos/123.jpg".
+// Handles plain file URLs, "/:i:/r/..." sharing-style links, and
+// "AllItems.aspx?id=..." / "?web=1" viewer links.
+function spLinkToSitePath(link) {
+  const v = (link || '').trim();
+  if (v.startsWith('/') && !v.startsWith('//')) {
+    return v.toLowerCase().startsWith(SP_SITE_PATH.toLowerCase() + '/') ? v.slice(SP_SITE_PATH.length) : v;
+  }
+  try {
+    const u = new URL(v);
+    let p = decodeURIComponent(u.pathname);
+    p = p.replace(/^\/:[a-z]:\/[rsgu]\//i, '/');          // sharing-link prefix
+    if (/\/_layouts\/|\/forms\/allitems\.aspx$/i.test(p)) {
+      const id = u.searchParams.get('id');
+      if (!id) return '';
+      p = decodeURIComponent(id);
+    }
+    if (!p.toLowerCase().startsWith(SP_SITE_PATH.toLowerCase() + '/')) return '';
+    return p.slice(SP_SITE_PATH.length);
+  } catch (e) {
+    return '';
+  }
+}
+
+function looksLikeImageData(v) {
+  return /^data:image\//i.test(v) || (v.length > 200 && /^[A-Za-z0-9+/=\r\n]+$/.test(v));
+}
+
+function base64ToBlob(b64, type) {
+  const bin = atob(b64.replace(/^data:[^,]*,/, '').replace(/\s/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: type || 'image/jpeg' });
+}
+
+function guessImageType(path) {
+  const ext = (path.match(/\.([a-z0-9]+)$/i) || [])[1] || '';
+  return ({ png: 'image/png', heic: 'image/heic', heif: 'image/heif', webp: 'image/webp', gif: 'image/gif' })[ext.toLowerCase()] || 'image/jpeg';
+}
+
+async function loadViewerBlob(link) {
+  if (viewerCache.has(link)) return viewerCache.get(link);
+  const v = link.trim();
+  let blob;
+
+  if (looksLikeImageData(v)) {
+    // Some rows may store the image itself rather than a link
+    const type = (v.match(/^data:([^;,]+)/) || [])[1] || 'image/png';
+    blob = base64ToBlob(v, type);
+  } else {
+    const path = spLinkToSitePath(v);
+    if (!path) throw new Error('bad-link');
+    const res = await fetch(GET_FILE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path })
+    });
+    if (!res.ok) throw new Error('http-' + res.status);
+    const data = await res.json();
+    const b64 = data.base64 || data['$content'] || '';
+    if (!b64) throw new Error('empty');
+    blob = base64ToBlob(b64, data.contentType || data['$content-type'] || guessImageType(path));
+  }
+
+  if (viewerCache.size >= 40) viewerCache.delete(viewerCache.keys().next().value);
+  viewerCache.set(link, blob);
+  return blob;
+}
+
+function openViewer(kind, i) {
+  const row = renderedLogRows[i];
+  if (!row) return;
+  const link = ((kind === 'photo' ? row['SharePoint Link'] : row['Recipient Signature']) || '').trim();
+  if (!link) return;
+
+  // Flow 4 not set up yet → keep the old behavior (opens SharePoint)
+  if (!GET_FILE_URL && !looksLikeImageData(link)) {
+    window.open(link, '_blank');
+    return;
+  }
+
+  const invoice = row['Invoice #'] || '';
+  const company = row['Company Name'] || '';
+  document.getElementById('viewerTitle').textContent = kind === 'photo' ? '📷 Proof of Delivery Photo' : '✍️ Recipient Signature';
+  document.getElementById('viewerSub').textContent = [invoice && ('Invoice ' + invoice), company].filter(Boolean).join(' · ');
+
+  const stage = document.getElementById('viewerStage');
+  const img = document.getElementById('viewerImg');
+  const status = document.getElementById('viewerStatus');
+  const shareBtn = document.getElementById('viewerShareBtn');
+  stage.classList.toggle('is-sig', kind !== 'photo');
+  img.style.display = 'none';
+  img.removeAttribute('src');
+  shareBtn.style.display = 'none';
+  status.style.display = 'block';
+  status.textContent = 'Loading…';
+  document.getElementById('viewerOverlay').classList.add('open');
+
+  const requestId = ++viewerRequestId;
+  loadViewerBlob(link).then(blob => {
+    if (requestId !== viewerRequestId) return; // user closed/opened another meanwhile
+    if (viewerObjectUrl) URL.revokeObjectURL(viewerObjectUrl);
+    viewerObjectUrl = URL.createObjectURL(blob);
+    img.onload = () => { status.style.display = 'none'; img.style.display = 'block'; };
+    img.onerror = () => { status.textContent = '⚠️ This image format can\'t be shown on this device.'; };
+    img.src = viewerObjectUrl;
+
+    const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+    const safeName = [invoice, company, kind === 'photo' ? 'Photo' : 'Signature']
+      .filter(Boolean).join('-').replace(/[^a-zA-Z0-9\-]+/g, '_');
+    viewerFile = new File([blob], `${safeName}.${ext}`, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [viewerFile] })) shareBtn.style.display = '';
+  }).catch(err => {
+    if (requestId !== viewerRequestId) return;
+    console.warn('Viewer load failed:', err);
+    status.innerHTML = '⚠️ Couldn\'t load this image.<br><small>Check your connection and try again.</small>' +
+      (/^https?:/i.test(link) ? `<br><br><small><a href="${escapeHtml(link)}" target="_blank" rel="noopener">Open in SharePoint instead</a> (requires Microsoft sign-in)</small>` : '');
+  });
+}
+
+function closeViewer() {
+  viewerRequestId++;
+  document.getElementById('viewerOverlay').classList.remove('open');
+  const img = document.getElementById('viewerImg');
+  img.style.display = 'none';
+  img.removeAttribute('src');
+  if (viewerObjectUrl) { URL.revokeObjectURL(viewerObjectUrl); viewerObjectUrl = null; }
+  viewerFile = null;
+}
+
+async function shareViewerImage() {
+  if (!viewerFile) return;
+  try { await navigator.share({ files: [viewerFile], title: viewerFile.name }); } catch (e) { /* cancelled */ }
 }
 
 async function fetchLog() {
