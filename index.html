@@ -1497,15 +1497,54 @@ function captureLocation() {
 // ══════════════════════════════════════════════════
 let photoFile = null, photoBase64 = null;
 
+// Delivery photos are shrunk to max 2000px JPEG before upload (a phone
+// camera shot is often 3–8 MB; this brings it to a few hundred KB). Keeps
+// uploads fast and lets the in-app viewer load them reliably. Falls back to
+// the original file if the browser can't decode it.
+let photoProcessing = Promise.resolve();
+
 function handlePhoto(e) {
   const file = e.target.files[0]; if (!file) return;
-  photoFile = file;
   document.getElementById('photoZone').classList.add('has-photo');
   const preview = document.getElementById('photoPreview');
   preview.style.display = 'block';
-  const reader = new FileReader();
-  reader.onload = ev => { preview.src = ev.target.result; photoBase64 = ev.target.result.split(',')[1]; };
-  reader.readAsDataURL(file);
+
+  photoProcessing = compressPhotoForUpload(file, 2000, 0.85)
+    .catch(err => { console.warn('Photo compression failed, using original:', err); return file; })
+    .then(out => new Promise(resolve => {
+      photoFile = out;
+      const reader = new FileReader();
+      reader.onload = ev => { preview.src = ev.target.result; photoBase64 = ev.target.result.split(',')[1]; resolve(); };
+      reader.onerror = () => resolve();
+      reader.readAsDataURL(out);
+    }));
+}
+
+function compressPhotoForUpload(file, maxDim, quality) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      canvas.toBlob(blob => {
+        URL.revokeObjectURL(url);
+        if (!blob) return reject(new Error('toBlob failed'));
+        // Only use the smaller version if it actually is smaller
+        if (blob.size >= file.size && /jpe?g$/i.test(file.type)) return resolve(file);
+        resolve(new File([blob], 'photo.jpg', { type: 'image/jpeg' }));
+      }, 'image/jpeg', quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode failed')); };
+    img.src = url;
+  });
 }
 
 // ══════════════════════════════════════════════════
@@ -1684,6 +1723,7 @@ async function submitForm() {
   const btn = document.getElementById('submitBtn');
   const label = document.getElementById('submitLabel');
   btn.classList.add('loading'); label.textContent = 'Submitting…';
+  await photoProcessing; // make sure the shrunk photo is ready
 
   const dateStr    = getEasternDateForFilename();          // MM_DD_YYYY
   const companySafe = companyName.replace(/[^a-zA-Z0-9]/g, '_');
@@ -1902,8 +1942,8 @@ function renderLogRows() {
     const driver   = row['Driver Name'] || '';
     const status   = row['Status'] || 'Delivered';
     const notes    = row['Notes / Comments'] || '';
-    const hasPhoto = !!(row['SharePoint Link'] || '').trim();
-    const hasSig   = !!(row['Recipient Signature'] || '').trim();
+    const hasPhoto = isViewableImageLink(row['SharePoint Link']);
+    const hasSig   = isViewableImageLink(row['Recipient Signature']);
 
     const photoBtn = hasPhoto
       ? `<button class="log-view-btn" onclick="event.stopPropagation();openViewer('photo',${i})">📷 View</button>`
@@ -2003,6 +2043,20 @@ function spLinkToSitePath(link) {
   }
 }
 
+// True only when the stored value is an actual image (a link ending in an
+// image file name, or embedded image data). Rows where the delivery flow
+// wrote a folder link or a blank-name link (no photo/signature was taken)
+// get a "—" instead of a View button that can never load.
+function isViewableImageLink(link) {
+  const v = (link || '').trim();
+  if (!v) return false;
+  if (looksLikeImageData(v)) return true;
+  const path = spLinkToSitePath(v);
+  if (path) return /\/[^\/]+\.(jpe?g|png|heic|heif|webp|gif)$/i.test(path);
+  // Unrecognized link format: keep the button so the SharePoint fallback still works
+  return /^https?:\/\//i.test(v);
+}
+
 function looksLikeImageData(v) {
   return /^data:image\//i.test(v) || (v.length > 200 && /^[A-Za-z0-9+/=\r\n]+$/.test(v));
 }
@@ -2019,6 +2073,27 @@ function guessImageType(path) {
   return ({ png: 'image/png', heic: 'image/heic', heif: 'image/heif', webp: 'image/webp', gif: 'image/gif' })[ext.toLowerCase()] || 'image/jpeg';
 }
 
+async function fetchFlowWithRetry(body) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90000);
+    try {
+      const res = await fetch(GET_FILE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: ctrl.signal
+      });
+      clearTimeout(timer);
+      if (attempt === 1 && [429, 500, 502, 503, 504].includes(res.status)) continue;
+      return res;
+    } catch (e) {
+      clearTimeout(timer);
+      if (attempt === 2) throw new Error(e.name === 'AbortError' ? 'timeout' : 'network');
+    }
+  }
+}
+
 async function loadViewerBlob(link) {
   if (viewerCache.has(link)) return viewerCache.get(link);
   const v = link.trim();
@@ -2031,13 +2106,27 @@ async function loadViewerBlob(link) {
   } else {
     const path = spLinkToSitePath(v);
     if (!path) throw new Error('bad-link');
-    const res = await fetch(GET_FILE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path })
-    });
-    if (!res.ok) throw new Error('http-' + res.status);
-    const data = await res.json();
+    const res = await fetchFlowWithRetry({ path });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.text()).slice(0, 200); } catch (e) {}
+      const err = new Error('http-' + res.status);
+      err.detail = detail; err.path = path;
+      throw err;
+    }
+    const resType = (res.headers.get('Content-Type') || '').toLowerCase();
+    if (resType.startsWith('image/') || resType.startsWith('application/octet-stream')) {
+      // Flow returns the file itself (recommended — no base64/JSON overhead)
+      const raw = await res.blob();
+      if (!raw.size) { const err = new Error('empty'); err.path = path; throw err; }
+      blob = resType.startsWith('image/') ? raw : new Blob([raw], { type: guessImageType(path) });
+      if (viewerCache.size >= 40) viewerCache.delete(viewerCache.keys().next().value);
+      viewerCache.set(link, blob);
+      return blob;
+    }
+    let data;
+    try { data = await res.json(); }
+    catch (e) { const err = new Error('bad-json'); err.path = path; throw err; }
     const b64 = data.base64 || data['$content'] || '';
     if (!b64) throw new Error('empty');
     blob = base64ToBlob(b64, data.contentType || data['$content-type'] || guessImageType(path));
@@ -2093,8 +2182,22 @@ function openViewer(kind, i) {
     if (navigator.canShare && navigator.canShare({ files: [viewerFile] })) shareBtn.style.display = '';
   }).catch(err => {
     if (requestId !== viewerRequestId) return;
-    console.warn('Viewer load failed:', err);
-    status.innerHTML = '⚠️ Couldn\'t load this image.<br><small>Check your connection and try again.</small>' +
+    console.warn('Viewer load failed:', err, err.path || '', err.detail || '');
+    const reasons = {
+      'bad-link': 'This row\'s link isn\'t a link to an image file.',
+      'http-403': 'The image flow refused this file (it\'s outside the allowed folder or isn\'t an image).',
+      'http-404': 'The file wasn\'t found in SharePoint.',
+      'http-400': 'The image flow couldn\'t open this file (it may have been renamed or never saved).',
+      'http-502': 'The image flow failed while reading the file (it may be too large or missing).',
+      'timeout': 'The image took too long to load.',
+      'network': 'No connection to the image flow.',
+      'empty': 'The image flow sent back an empty file.',
+      'bad-json': 'The image flow sent back something unexpected.'
+    };
+    const why = reasons[err.message] || ('Error: ' + err.message);
+    status.innerHTML = '⚠️ Couldn\'t load this image.<br><small>' + escapeHtml(why) + '</small>' +
+      (err.path ? '<br><small style="opacity:.6;word-break:break-all">' + escapeHtml(err.path) + '</small>' : '') +
+      `<br><br><button class="viewer-btn" onclick="viewerCache.delete(${JSON.stringify(link).replace(/"/g,'&quot;')});openViewer('${kind}',${i})">↻ Try again</button>` +
       (/^https?:/i.test(link) ? `<br><br><small><a href="${escapeHtml(link)}" target="_blank" rel="noopener">Open in SharePoint instead</a> (requires Microsoft sign-in)</small>` : '');
   });
 }
