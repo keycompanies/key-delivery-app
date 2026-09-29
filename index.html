@@ -1970,7 +1970,7 @@ window.addEventListener('resize', updateLogScrollHint);
 // ══════════════════════════════════════════════════
 // Paste the HTTP trigger URL of Flow 4 here. While blank, the View buttons
 // fall back to opening the SharePoint link (the old sign-in behavior).
-const GET_FILE_URL = '';
+const GET_FILE_URL = 'https://defaultc65b75b8a15a4648ba851eda1fe17f.62.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/00/workflows/13d39a7174144566aed29498340f0260/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=c5H41StnOxEFhAYlrUkyKk4GAbMNt26DfbcsVPjP7vk';
 
 const SP_SITE_PATH = new URL(SHAREPOINT_SITE).pathname.replace(/\/$/, ''); // "/sites/Delivery"
 const viewerCache = new Map();   // link -> Blob, so re-opening is instant
