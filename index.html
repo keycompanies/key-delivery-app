@@ -773,7 +773,7 @@
         <div class="photo-zone" id="photoZone">
           <div class="photo-icon">📸</div>
           <div class="photo-label">Add a proof of delivery photo</div>
-          <div class="photo-sub">Saved as: INVOICE# · DATE · COMPANY NAME</div>
+          <div class="photo-sub">Saved as: INVOICE# · DATE · TIME · COMPANY NAME</div>
           <div class="photo-btn-row">
             <button type="button" class="photo-btn" onclick="document.getElementById('photoInputCamera').click()">📷 Take Photo</button>
             <button type="button" class="photo-btn secondary" onclick="document.getElementById('photoInputLibrary').click()">🖼️ Camera Roll</button>
@@ -874,6 +874,7 @@ async function handlePackingSlip(event) {
     // "Ship To" text to conflict with. Then fall back to Ship-To parsing.
     let parsed = null;
     try { parsed = parseLabelForm(words); } catch (e) { console.warn('Label-form parse failed:', e); }
+    const isRandomLabel = !!parsed;   // label layout = no invoice, no promised date
 
     if (!parsed) {
       try { parsed = parseShipToColumn(words); } catch (e) { console.warn('Column parse failed:', e); }
@@ -887,6 +888,19 @@ async function handlePackingSlip(event) {
     if (parsed.customer)  { flashFill('customerName', parsed.customer); foundCount++; }
     if (parsed.address)   { flashFill('deliveryAddress', parsed.address); foundCount++; }
     if (parsed.jobNumber) { flashFill('jobNumber', parsed.jobNumber); foundCount++; }
+
+    // Promised date/time — read silently from the slip for the management
+    // dashboard's on-time metrics. Not shown to drivers.
+    // Random labels don't have one → "N/A" (excluded from on-time counts).
+    promisedDue = '';
+    if (isRandomLabel) {
+      promisedDue = 'N/A';
+    } else {
+      try {
+        const promised = extractPromised(text, words);
+        if (promised) promisedDue = promised.time ? `${promised.date} ${promised.time}` : promised.date;
+      } catch (e) { console.warn('Promised parse failed:', e); }
+    }
 
     if (foundCount > 0) {
       status.textContent = '✅ Autofilled ' + foundCount + ' field' + (foundCount===1?'':'s') + ' — please verify below before submitting';
@@ -1331,6 +1345,69 @@ function findLabeledNumber(text, label) {
 }
 
 
+// ══════════════════════════════════════════════════
+// PROMISED DATE / TIME (packing slips)
+// Handles "Promised: 09/30/2026 10:00 AM" on one line, and a "Promised"
+// column header with the value printed underneath it.
+// ══════════════════════════════════════════════════
+const MONTHS = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, sept:9, oct:10, nov:11, dec:12 };
+
+function parsePromisedDate(s) {
+  let m = s.match(/\b(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{2,4})\b/);
+  let y, mo, d, idx, len;
+  if (m) { mo = +m[1]; d = +m[2]; y = +m[3]; idx = m.index; len = m[0].length; }
+  else {
+    m = s.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b/i);
+    if (!m) return null;
+    mo = MONTHS[m[1].toLowerCase()]; d = +m[2]; y = +m[3]; idx = m.index; len = m[0].length;
+  }
+  if (y < 100) y += 2000;
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCMonth() !== mo - 1) return null;                         // e.g. 02/31
+  if (Math.abs(dt - Date.now()) > 400 * 86400000) return null;         // OCR garbage, not a real promise date
+  return { iso: `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`, idx, len };
+}
+
+function parsePromisedTime(s) {
+  let m = s.match(/\b(\d{1,2})(?:\s*:\s*(\d{2}))?\s*([ap])\.?\s*m\b\.?/i);
+  if (m) {
+    let h = +m[1] % 12; if (/p/i.test(m[3])) h += 12;
+    const mm = m[2] || '00';
+    if (+m[1] > 12 || +mm > 59) return '';
+    return `${String(h).padStart(2, '0')}:${mm}`;
+  }
+  m = s.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+}
+
+function extractPromised(text, words) {
+  // 1) Same line
+  for (const line of text.split('\n')) {
+    const i = line.search(/promised/i);
+    if (i < 0) continue;
+    const after = line.slice(i).replace(/^promised\s*(date|by|delivery|ship)?\s*[:#\-]?\s*/i, '');
+    const d = parsePromisedDate(after);
+    if (d && d.idx <= 20) return { date: d.iso, time: parsePromisedTime(after.slice(d.idx + d.len, d.idx + d.len + 16)) };
+  }
+  // 2) Column header — look in the next two rows, under the header's x-span
+  const rows = buildRowsWithWords(words || []);
+  for (let r = 0; r < rows.length; r++) {
+    const w = rows[r].words.find(x => /^promised/i.test(x.text));
+    if (!w) continue;
+    const x0 = w.bbox.x0 - 40, x1 = w.bbox.x1 + 140;
+    for (let k = r + 1; k <= r + 2 && k < rows.length; k++) {
+      const txt = rows[k].words.filter(x => x.bbox.x1 >= x0 && x.bbox.x0 <= x1).map(x => x.text).join(' ');
+      const d = parsePromisedDate(txt);
+      if (d) return { date: d.iso, time: parsePromisedTime(txt.slice(d.idx + d.len)) };
+    }
+  }
+  return null;
+}
+
+// What gets saved: "N/A", "YYYY-MM-DD", "YYYY-MM-DD HH:MM", or "" (not found on the slip)
+let promisedDue = '';
+
 function flashFill(id, value) {
   const el = document.getElementById(id);
   el.value = value;
@@ -1731,14 +1808,19 @@ async function submitForm() {
   const ext = photoFile ? (photoFile.name.match(/\.[^.]+$/)?.[0] || '.jpg') : '.jpg';
 
   // ── Photo filename: JOBNUMBER-DATE-COMPANY.ext ──
+  // Time (HHMMSS, Eastern) makes every file name unique, so SharePoint never
+  // rejects a re-submitted invoice as a duplicate file name.
+  const timeStr = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    .format(new Date()).replace(/\D/g, '');
+
   const photoFilename = photoFile
-    ? `${jobSafe}-${dateStr}-${companySafe}${ext}`
+    ? `${jobSafe}-${dateStr}-${timeStr}-${companySafe}${ext}`
     : '';
 
   // ── Signature filename ──
   const signatureBase64   = getSignatureBase64();
   const signatureFilename = signatureBase64
-    ? `${jobSafe}-${dateStr}-${companySafe}-SIGNATURE.png`
+    ? `${jobSafe}-${dateStr}-${timeStr}-${companySafe}-SIGNATURE.png`
     : '';
 
   const payload = {
@@ -1749,6 +1831,7 @@ async function submitForm() {
     jobNumber,
     deliveryAddress:   deliveryAddr,
     notes:             document.getElementById('notes').value.trim(),
+    promisedDue,
     geoAddress:        geoData.address,
     geoLat:            geoData.lat,
     geoLng:            geoData.lng,
@@ -1796,6 +1879,7 @@ function resetForm() {
   ['companyName','customerName','jobNumber','deliveryAddress','notes','geoAddress'].forEach(
     id => document.getElementById(id).value = ''
   );
+  promisedDue = '';
   document.getElementById('geoStatus').textContent = 'Location not yet captured';
   document.getElementById('geoStatus').className = 'geo-status';
   document.getElementById('geoBtn').textContent = '📍';
